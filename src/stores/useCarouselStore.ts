@@ -80,6 +80,15 @@ interface CarouselState {
   expanded: Set<ModuleId>;
   toggleExpanded: (id: ModuleId, on?: boolean) => void;
 
+  /**
+   * Multi-selection. Separate from `hovered` and from `open`: you can hold
+   * several cards selected while still hovering a different one, which is the
+   * whole point of being able to select more than one.
+   */
+  selected: Set<ModuleId>;
+  selectSpan: (ids: ModuleId[]) => void;
+  clearSelection: () => void;
+
   stateOf: (id: ModuleId) => CardState;
 }
 
@@ -159,6 +168,10 @@ export const useCarouselStore = create<CarouselState>()((set, get) => ({
   frozen: false,
   setFrozen: (frozen) => set({ frozen }),
 
+  selected: new Set<ModuleId>(),
+  selectSpan: (ids) => set({ selected: new Set(ids) }),
+  clearSelection: () => set({ selected: new Set<ModuleId>() }),
+
   expanded: new Set<ModuleId>(),
   toggleExpanded: (id, on) =>
     set((s) => {
@@ -174,6 +187,7 @@ export const useCarouselStore = create<CarouselState>()((set, get) => ({
     if (s.dragging === id) return 'dragging';
     if (s.open === id) return 'focused';
     if (s.pending === id) return 'selected';
+    if (s.selected.has(id)) return 'selected';
     if (s.expanded.has(id)) return 'expanded';
     if (s.hovered === id) return 'hovered';
     return 'idle';

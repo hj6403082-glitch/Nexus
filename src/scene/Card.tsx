@@ -78,6 +78,8 @@ export function Card({ module, index, count, radius }: CardProps) {
       dragX: makeSpring(0),
       dragY: makeSpring(0),
       dragZ: makeSpring(0),
+      // Ripple travels 0 → 1 once per impact and is then left alone.
+      ripple: makeSpring(1),
     }),
     [],
   );
@@ -133,6 +135,7 @@ export function Card({ module, index, count, radius }: CardProps) {
   }, [accent]);
 
   const lastState = useRef<CardState>('idle');
+  const lastGesture = useRef(0);
 
   useFrame((state, rawDelta) => {
     const g = group.current;
@@ -153,7 +156,23 @@ export function Card({ module, index, count, radius }: CardProps) {
         springs.pulse.value = 0;
         springs.pulse.velocity = 0;
       }
+      // Every state change strikes the surface. The card ripples when it is
+      // picked up, put down, hovered or opened — the microinteraction the
+      // brief asks for, driven by what actually happened rather than by a
+      // timer.
+      springs.ripple.value = 0;
+      springs.ripple.velocity = 0;
       lastState.current = cardState;
+    }
+
+    // A recognised gesture ripples the card it was aimed at.
+    const gestureStamp = useGestureStore.getState().gestureAt;
+    if (gestureStamp !== lastGesture.current) {
+      lastGesture.current = gestureStamp;
+      if (carousel.hovered === module.id) {
+        springs.ripple.value = 0;
+        springs.ripple.velocity = 0;
+      }
     }
 
     const pose = STATE_POSE[cardState];
@@ -197,6 +216,7 @@ export function Card({ module, index, count, radius }: CardProps) {
     advanceSpring(springs.glow, pose.glow, MOTION.ACKNOWLEDGING, dt);
     advanceSpring(springs.lift, pose.lift, MOTION.ARRIVING, dt);
     advanceSpring(springs.pulse, 1, MOTION.LEAVING, dt);
+    advanceSpring(springs.ripple, 1, MOTION.LEAVING, dt);
 
     // Cards fade out behind the dissolve envelope during the transformation.
     // Cards BEHIND the user go first — they have the furthest to travel and
@@ -262,6 +282,7 @@ export function Card({ module, index, count, radius }: CardProps) {
       u.uSelected.value = cardState === 'selected' || cardState === 'focused' ? 1 : 0;
       u.uOpacity.value = springs.opacity.value * (0.55 + springs.glow.value * 0.45);
       u.uDissolve.value = dissolve;
+      u.uRipple.value = springs.ripple.value;
 
       // Approach scan line: sweeps the face top to bottom during APPROACH only.
       u.uScan.value =

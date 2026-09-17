@@ -25,8 +25,8 @@ Built in seven passes, each extending the last rather than replacing it.
 |---|---|
 | **1 — Foundation** | The room, the ring, ten glass cards with live data, MediaPipe hand tracking, hover/select/drag on hand or pointer, spring physics, adaptive quality, synthesised audio, a four-corner HUD. |
 | **2 — AI brain** | Streaming Gemini through a server proxy, `SpeechRecognition` with barge-in interruption, speech that starts before the response finishes, holographic text that assembles from scattered words. |
-| **3 — Knowledge** | Real adapters for Instagram, stocks, weather and news; sample adapters for the rest. Opening a module raises a 3D stage: a chart that stands up off the floor, a deck of articles you swipe through, a constellation of project worlds. Every figure carries provenance and age. |
-| **4 — Worlds** | Six named environments switchable by voice or ⌘K, a weather world with real precipitation, cinematic module transitions, light trails on every gesture, two-hand zoom / group / split. |
+| **3 — Knowledge** | Real adapters for Instagram, stocks, weather and news; sample adapters for the rest. The System module reads the actual machine — CPU, GPU, battery, network, memory, storage. Opening a module raises a 3D stage: a chart that stands up off the floor, a deck of articles you swipe through, a constellation of project worlds. Every figure carries provenance and age. |
+| **4 — Worlds** | Six named environments switchable by voice or ⌘K, a weather world with real precipitation, a Stocks world whose floor becomes a live market grid, cinematic module transitions, light trails on every gesture, cards that ripple when struck, a fill light that responds to speech and gesture, two-hand zoom / group / split / multi-select. |
 | **5 — Desktop bridge** | A hardened local API that launches apps, opens windows on a chosen display, and drives media — macOS only, off by default. A ⌘K palette over apps, sites and commands. |
 | **6 — Stillness** | Ambient motion off by default and gated on a multiplier; one master clock for module presentation; six filmic colour grades; gold for the centred card, isolated from warning orange. |
 | **7 — The human form** | The cards dissolve into particles, gather, and reassemble as a signed-distance bust that breathes, watches you, speaks, and presents panels from its hand. |
@@ -101,6 +101,18 @@ settles elastically — and on release the target simply becomes its orbit slot
 again and the same spring carries it home. No physics simulation is involved:
 a thrown card has to be found again, and "where did it go" is a chore, not an
 interaction.
+
+**Saturation above 1.0 can produce NaN, and NaN renders as a hole.** Mixing
+toward grey with a factor above one extrapolates *away* from grey, which drives
+the weakest channel of a strongly saturated colour below zero. Cyan type on a
+dark card is the worst case: its red channel lands at about −0.035 at saturation
+1.10. Nothing downstream minds until the final sRGB encode, where a fractional
+power of a negative base is NaN — so the headline figure and the sparkline were
+simply *erased* from a focused card, worst in the highest-saturation worlds,
+while the duller white text survived. Same family as `safePow` in
+`core/math/util.ts`. The grade clamps after saturation now, and the visual suite
+checks a card in Market Grid specifically, because Minimal Studio sits at
+saturation 1.0 and never showed it.
 
 **Halation is its own pass, and it has to be.** It reads neighbouring texels,
 which makes it a convolution, and `postprocessing` needs
@@ -198,18 +210,25 @@ back-accumulating from the current total.
 ## Verification
 
 ```bash
-npm run verify          # 18 logic checks, no browser needed
+npm run lint:shaders    # a backtick in a shader comment ends the literal
+npm run verify          # shader lint + 24 logic checks, no browser needed
 npm run build && npm start
-npm run verify:visual   # 16 checks against the running app, with screenshots
+npm run verify:visual   # 28 checks against the running app, with screenshots
 ```
 
-The logic suite is 20 checks; the visual suite is 25.
+The logic suite is 24 checks; the visual suite is 28.
 
 `verify` covers the gold/warning isolation across the whole centredness range,
 the exact-zero drift arithmetic, transformation envelope bounds, command and
 environment matching, the ⌘K ranking ladder, weather-condition mapping,
-Instagram back-accumulation, and that injected command strings resolve to
-nothing.
+Instagram back-accumulation, that multi-select is told apart from zoom by dwell
+rather than by pose, that the System card degrades to "unavailable" rather than
+disappearing on a browser without the Battery API, and that injected command
+strings resolve to nothing.
+
+`lint:shaders` exists because a backtick inside a GLSL comment silently ends
+the template literal, and the error it produces points at a line of shader code
+and says nothing about quoting. It cost three builds before it became a lint.
 
 `verify:visual` drives the real UI — the ⌘K palette, the pointer, the on-screen
 controls — and checks that the ring renders, that drift is exactly zero in the
@@ -287,5 +306,13 @@ Two of these are deliberate; please push back if you disagree.
 - **The figure breathes.** "Holds still" means no drift, no sway and no float —
   the chest moving and the head turning toward you are deliberate, and the only
   motion the figure has.
+- **Project media are listed, not played.** The project worlds carry the names
+  and counts the adapter returns; there is no video surface in the scene yet.
+- **AI responses assemble word by word, not particle by particle.** Each word
+  arrives from a scattered position with its own blur and settles into the line.
+  A literal per-glyph particle assembly would need the text rasterised into the
+  Phase 7 buffer, which is a larger change than it looks.
+- **Glass does not bend.** Cards ripple, particles react and the fill light
+  responds, but there is no refraction pass distorting what is behind a card.
 - **WebGL2 is required** for the figure (the bake reads back float targets).
   Without WebGL at all, the app serves a flat mode with the same live data.

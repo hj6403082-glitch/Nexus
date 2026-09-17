@@ -15,7 +15,8 @@ export type GestureName =
   | 'two-hand-zoom'
   | 'two-hand-throw'
   | 'two-hand-group'
-  | 'two-hand-split';
+  | 'two-hand-split'
+  | 'two-hand-multi-select';
 
 export type TrackingState = 'off' | 'starting' | 'live' | 'lost' | 'denied' | 'unsupported';
 

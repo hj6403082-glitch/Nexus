@@ -58,12 +58,41 @@ export const useModuleData = create<ModuleDataState>()((set, get) => ({
         detail: unknown;
         provenance: 'live' | 'sample';
       };
+      let face = json.face;
+      let detail = json.detail;
+
+      /**
+       * The System module is enriched on the client, because the client is
+       * where the answers are: a Node process cannot report the battery, the
+       * link speed, the GPU or the origin's disk usage. The server still
+       * supplies its own side of it, and both are merged rather than one
+       * replacing the other.
+       */
+      if (id === 'system') {
+        const { readClientTelemetry, telemetryRows } = await import('./clientTelemetry');
+        const telemetry = await readClientTelemetry();
+        face = {
+          ...face,
+          rows: telemetryRows(telemetry, face.rows ?? []),
+          metric: telemetry.cores ? String(telemetry.cores) : face.metric,
+          metricLabel: telemetry.cores ? 'logical cores' : face.metricLabel,
+          status: telemetry.battery && telemetry.battery.level < 0.15 && !telemetry.battery.charging
+            ? 'battery low'
+            : 'nominal',
+          // The only thing in the System module that earns warning orange.
+          warned: Boolean(
+            telemetry.battery && telemetry.battery.level < 0.15 && !telemetry.battery.charging,
+          ),
+        };
+        detail = { server: json.detail, client: telemetry };
+      }
+
       set((s) => ({
         records: {
           ...s.records,
           [id]: {
-            face: json.face,
-            detail: json.detail,
+            face,
+            detail,
             fetchedAt: Date.now(),
             provenance: json.provenance,
           },

@@ -23,7 +23,7 @@
  */
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
-import { countPixels, readPng } from './png.mjs';
+import { countPixels, meanGreenOverRed, readPng } from './png.mjs';
 
 const URL = process.env.NEXUS_URL ?? 'http://localhost:3000';
 const SHOTS = process.env.SHOTS ?? '.verify-shots';
@@ -192,6 +192,70 @@ const weather = await until(
 check('opening weather morphs the world to match it', Boolean(weather));
 await page.waitForTimeout(3500);
 await page.screenshot({ path: `${SHOTS}/01e-weather.png` });
+
+// --- the system module reports the machine ---------------------------------
+await page.keyboard.press('Meta+k');
+await page.waitForTimeout(700);
+await page.click(PALETTE);
+await page.type(PALETTE, 'system', { delay: 40 });
+await page.keyboard.press('Enter');
+const systemRows = await until(async () => {
+  const rows = await page.evaluate(() => window.__nexus().rows?.system ?? []);
+  return rows.length >= 6 ? rows : null;
+}, 30_000, 800);
+check(
+  'the system card reports cpu, gpu, battery, network, memory and storage',
+  Boolean(systemRows) &&
+    ['cpu', 'gpu', 'battery', 'network', 'memory', 'storage'].every((s) =>
+      systemRows.includes(s),
+    ),
+  systemRows ? systemRows.join(', ') : 'no rows',
+);
+
+// --- the floor becomes a market grid ---------------------------------------
+// Measured in pixels: the market grid is green-cyan and the room's lattice is
+// blue, so this counts pixels where green leads and compares the floor before
+// and after opening Stocks.
+const floorClip = { x: 120, y: 600, width: 1200, height: 280 };
+const beforeFloor = meanGreenOverRed(readPng(await page.screenshot({ clip: floorClip })));
+
+await page.keyboard.press('Meta+k');
+await page.waitForTimeout(700);
+await page.click(PALETTE);
+await page.type(PALETTE, 'stocks', { delay: 40 });
+await page.keyboard.press('Enter');
+await until(
+  async () => ((await page.evaluate(() => window.__nexus().world)) === 'market-grid' ? true : null),
+  30_000,
+  700,
+);
+await page.waitForTimeout(9000);
+const afterFloor = meanGreenOverRed(readPng(await page.screenshot({ clip: floorClip })));
+await page.screenshot({ path: `${SHOTS}/01f-market-grid.png` });
+check(
+  'opening stocks converts the floor into a market grid',
+  afterFloor - beforeFloor > 1.5,
+  `mean green-over-red ${beforeFloor.toFixed(2)} → ${afterFloor.toFixed(2)}`,
+);
+
+/**
+ * The same type check again, in the HIGHEST-SATURATION world.
+ *
+ * This is the case that actually broke: saturation above 1.0 extrapolates away
+ * from grey and drove cyan type's red channel negative, and the final sRGB
+ * encode turned every one of those pixels into a NaN hole. Minimal Studio sits
+ * at saturation 1.0 and never showed it; Market Grid is at 1.10 and erased the
+ * headline figure completely.
+ */
+const gradedCard = readPng(
+  await page.screenshot({ clip: { x: 520, y: 170, width: 420, height: 400 } }),
+);
+const gradedBright = countPixels(gradedCard, (r, g, b) => b > 150 && b > r + 70 && g > r + 40);
+check(
+  'saturated type survives the most saturated world',
+  gradedBright > 600,
+  `${gradedBright} cyan pixels in market grid`,
+);
 
 // --- presentation ----------------------------------------------------------
 await page.keyboard.press('Meta+k');

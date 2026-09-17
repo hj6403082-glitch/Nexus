@@ -219,9 +219,18 @@ export async function sports(): Promise<ModulePayload> {
     ['Chelsea — Villa', '3 – 2'],
     ['Newcastle — Brighton', '1 – 1'],
   ] as [string, string][];
+  // Standings, so the module answers "how is my team doing" and not only
+  // "what is the score right now".
+  const standings = [
+    { position: 1, team: 'Arsenal', played: 28, points: 64, goalDifference: 34 },
+    { position: 2, team: 'Liverpool', played: 28, points: 61, goalDifference: 31 },
+    { position: 3, team: 'Manchester City', played: 28, points: 60, goalDifference: 38 },
+    { position: 4, team: 'Chelsea', played: 28, points: 52, goalDifference: 18 },
+    { position: 5, team: 'Newcastle', played: 28, points: 48, goalDifference: 12 },
+  ];
   return {
     provenance: 'sample',
-    detail: { fixtures },
+    detail: { fixtures, standings },
     face: {
       title: 'Sports',
       caption: 'Live · Fixtures · Standings',

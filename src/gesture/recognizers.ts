@@ -196,9 +196,13 @@ export class MotionRecognizer {
 }
 
 /** Phase 4 two-hand interactions. Only meaningful when both hands are present. */
+const MULTI_SELECT_HOLD_MS = 620;
+
 export class TwoHandRecognizer {
   private baseline: number | null = null;
   private lastFire = 0;
+  private holdSince = 0;
+  private selectFired = false;
 
   detect(
     a: HandSnapshot,
@@ -222,6 +226,27 @@ export class TwoHandRecognizer {
     if (bothPinching && Math.abs(ratio - 1) > 0.22) {
       return { name: 'two-hand-zoom', confidence: clamp01(Math.abs(ratio - 1)), value: ratio };
     }
+
+    /**
+     * MULTI-SELECT: both hands pinched and HELD, without the separation
+     * changing. Zoom is the same pose in motion, so the two are told apart by
+     * whether the hands are travelling — which means multi-select needs a dwell
+     * before it can fire, or every zoom would select something on its way past.
+     */
+    if (bothPinching && Math.abs(ratio - 1) <= 0.12) {
+      if (this.holdSince === 0) this.holdSince = now;
+      if (!this.selectFired && now - this.holdSince > MULTI_SELECT_HOLD_MS) {
+        this.selectFired = true;
+        this.lastFire = now;
+        // The value is the span between the hands, in the same -1..1 space the
+        // cards are picked in, so the consumer can decide what falls inside it.
+        return { name: 'two-hand-multi-select', confidence: 0.85, value: separation };
+      }
+    } else {
+      this.holdSince = 0;
+      this.selectFired = false;
+    }
+
     if (now - this.lastFire < 700) return null;
 
     if (bothOpen && ratio > 1.55) {
@@ -239,5 +264,7 @@ export class TwoHandRecognizer {
 
   reset(): void {
     this.baseline = null;
+    this.holdSince = 0;
+    this.selectFired = false;
   }
 }

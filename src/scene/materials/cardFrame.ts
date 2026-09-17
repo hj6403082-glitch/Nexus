@@ -25,6 +25,10 @@ export const cardFrameShader = {
     uSelected: { value: 0 },
     uScan: { value: -1 },
     uDissolve: { value: 0 },
+    // A ripple impulse: 0 at rest, driven 0 → 1 once when something happens
+    // TO this card. The wave travels outward from the impact as it decays.
+    uRipple: { value: 0 },
+    uRippleAt: { value: new THREE.Vector2(0.5, 0.5) },
     uRadius: { value: 0.07 },
     uAspect: { value: 0.727 },
   },
@@ -52,6 +56,8 @@ export const cardFrameShader = {
     uniform float uSelected;
     uniform float uScan;
     uniform float uDissolve;
+    uniform float uRipple;
+    uniform vec2  uRippleAt;
     uniform float uRadius;
     uniform float uAspect;
 
@@ -102,6 +108,17 @@ export const cardFrameShader = {
       // --- energy pulse on select ------------------------------------------
       float pulseRing = smoothstep(0.05, 0.0, abs(d + uPulse * 0.45));
       intensity += pulseRing * (1.0 - uPulse) * 0.9 * uSelected;
+
+      // --- ripple -----------------------------------------------------------
+      // A ring expanding from the point of impact. It reads as the surface
+      // being STRUCK rather than merely lighting up, which is the difference
+      // between glass and a lamp.
+      if (uRipple > 0.001) {
+        float fromImpact = length((vUv - uRippleAt) * vec2(1.0, 1.0 / uAspect));
+        float front = uRipple * 0.9;
+        float ring = smoothstep(0.10, 0.0, abs(fromImpact - front));
+        intensity += ring * (1.0 - uRipple) * 0.55;
+      }
 
       // --- approach scan line (Phase 6) -------------------------------------
       // Hard-edged on purpose: a soft gradient reads as a lighting change, a

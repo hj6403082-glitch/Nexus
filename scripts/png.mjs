@@ -96,3 +96,21 @@ export function countPixels({ width, height, channels, pixels }, predicate) {
   }
   return n;
 }
+
+/**
+ * Mean of (green − red) across an image, in 0–255.
+ *
+ * A far steadier signal than counting pixels above a brightness threshold: a
+ * thin grid of lines covers few pixels, so a count is dominated by exactly how
+ * bright the lines happen to be, and the threshold has to be re-tuned every
+ * time the art changes. The mean hue shift of a region does not care.
+ */
+export function meanGreenOverRed({ width, height, channels, pixels }) {
+  let total = 0;
+  const count = width * height;
+  for (let i = 0; i < count; i++) {
+    const o = i * channels;
+    total += pixels[o + 1] - pixels[o];
+  }
+  return total / count;
+}

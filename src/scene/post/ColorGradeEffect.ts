@@ -59,15 +59,33 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   c.r *= 1.0 + uWarmth * 0.22;
   c.b *= 1.0 - uWarmth * 0.22;
 
-  float gl = luma(c);
-  c = mix(vec3(gl), c, uSaturation);
+  /**
+   * SATURATION, AND THE CLAMP THAT MUST FOLLOW IT.
+   *
+   * Mixing toward grey with a factor above 1 extrapolates AWAY from grey, and
+   * for a strongly saturated colour that drives the WEAKEST channel BELOW ZERO.
+   * Cyan type on a dark card is the worst case: its red channel is already
+   * near nothing, and at saturation 1.10 it lands at about -0.035.
+   *
+   * A negative channel survives everything downstream until the final sRGB
+   * encode, where pow(negative, 1/2.2) is NaN — and a NaN pixel renders as a
+   * hole. The symptom was that bright saturated type and thin accent lines
+   * were ERASED from the card faces while the duller white text survived,
+   * worst in the worlds with the highest saturation.
+   *
+   * Same family as safePow in core/math/util.ts: never hand a negative base
+   * to a fractional power. Clamp at the source.
+   */
+  float greyLevel = luma(c);
+  c = max(vec3(0.0), mix(vec3(greyLevel), c, uSaturation));
 
   // Vignette last. Phase 7 releases most of it while embodied: at full
   // strength it crops a bust that fills the frame into a black oval.
   float v = 1.0 - uVignette * smoothstep(0.35, 1.0, length(uv - 0.5) * 1.42);
   c *= v;
 
-  outputColor = vec4(c, inputColor.a);
+  // Belt to the braces above: nothing leaves this effect negative.
+  outputColor = vec4(max(c, vec3(0.0)), inputColor.a);
 }
 `;
 

@@ -8,6 +8,7 @@ import { Precipitation } from './env/Precipitation';
 import { Carousel } from './Carousel';
 import { GestureTrail } from './GestureTrail';
 import { Picker } from './Picker';
+import { ReactiveLight } from './ReactiveLight';
 import { FocusStage } from './focus/FocusStage';
 import { PresentationClock } from './PresentationClock';
 import { TargetingBracket } from './TargetingBracket';
@@ -20,6 +21,7 @@ import { useSystemStore } from '@/stores/useSystemStore';
 import { useCarouselStore } from '@/stores/useCarouselStore';
 import { useGestureStore } from '@/stores/useGestureStore';
 import { cardRegistry } from './cardRegistry';
+import { useModuleData } from '@/stores/useModuleData';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { damp } from '@/core/math/spring';
 
@@ -69,7 +71,7 @@ function SceneBody() {
       <fog attach="fog" args={['#070b12', 3, 26]} />
       <ambientLight intensity={0.22} color="#7fa8e8" />
       <directionalLight position={[-3, 5, 4]} intensity={0.9} color={grade.keyLight} />
-      <pointLight position={[0, 1.4, 0.5]} intensity={0.5} color="#6ea8ff" distance={9} />
+      <ReactiveLight />
 
       <Rig />
       <PresentationClock />
@@ -140,7 +142,36 @@ function Probe() {
       })(),
       transform: useTransformStore.getState().phase,
       log: useSystemStore.getState().log.map((l) => l.text),
+      // The row labels each module is currently carrying. Card faces are drawn
+      // to a canvas, so this is the only way a harness can assert what a card
+      // actually says.
+      rows: Object.fromEntries(
+        Object.entries(useModuleData.getState().records).map(([id, record]) => [
+          id,
+          (record?.face.rows ?? []).map(([label]) => label),
+        ]),
+      ),
     });
+
+    /**
+     * The raw card face, as a data URL.
+     *
+     * Card faces are drawn to a canvas, so when something on a face is missing
+     * there are two very different possible culprits — the painter never drew
+     * it, or the renderer lost it — and no amount of staring at the composite
+     * can tell them apart. This hands the harness the painter's own pixels.
+     */
+    (window as unknown as { __nexusFace?: (id: string) => string | null }).__nexusFace = (
+      id: string,
+    ) => {
+      const handle = cardRegistry.get(id as never);
+      if (!handle) return null;
+      try {
+        return handle.painter.canvas.toDataURL();
+      } catch {
+        return null;
+      }
+    };
 
     w.__nexusTransform = () => {
       const t = useTransformStore.getState();
@@ -157,6 +188,7 @@ function Probe() {
     return () => {
       delete w.__nexus;
       delete w.__nexusTransform;
+      delete (window as unknown as { __nexusFace?: unknown }).__nexusFace;
     };
   }, [camera]);
 

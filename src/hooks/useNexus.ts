@@ -310,6 +310,11 @@ export function useNexus() {
           break;
         }
         case 'palm-hold':
+          // An open palm held still also clears a multi-selection: the same
+          // "stop" gesture that freezes the ring lets go of what is held.
+          if (useCarouselStore.getState().selected.size > 0) {
+            useCarouselStore.getState().clearSelection();
+          }
           carousel.setFrozen(!carousel.frozen);
           useSystemStore
             .getState()
@@ -323,6 +328,37 @@ export function useNexus() {
         case 'two-hand-zoom':
           if (event.value) carousel.zoom(event.value > 1 ? 0.97 : 1.03);
           break;
+        /**
+         * Multi-select takes the cards spanned BETWEEN the two hands. The span
+         * is an angle on the ring, not a screen rectangle: the ring is a
+         * circle around you, so "between my hands" means an arc.
+         */
+        case 'two-hand-multi-select': {
+          const hands = useGestureStore.getState().hands;
+          const from = Math.min(hands[0].x, hands[1].x);
+          const to = Math.max(hands[0].x, hands[1].x);
+          const spanned = MODULES.filter((mod, i) => {
+            const worldAngle =
+              (i / MODULES.length) * Math.PI * 2 * carousel.spread + carousel.angle;
+            // Only cards in front of the user can be spanned; the ones behind
+            // are not on screen to be pointed at.
+            if (Math.cos(worldAngle) < 0.1) return false;
+            const screenX = Math.sin(worldAngle) / Math.max(0.2, Math.cos(worldAngle));
+            return screenX >= from - 0.15 && screenX <= to + 0.15;
+          }).map((mod) => mod.id);
+
+          if (spanned.length > 0) {
+            carousel.selectSpan(spanned);
+            audio.play('confirm', 0.7);
+            useSystemStore
+              .getState()
+              .pushLog(`${spanned.length} selected · ${spanned.join(', ')}`, 'ok');
+          } else {
+            carousel.clearSelection();
+          }
+          break;
+        }
+
         case 'two-hand-split':
           carousel.setSpread(useCarouselStore.getState().spread * 1.18);
           useSystemStore.getState().pushLog('cards fanned', 'ok');

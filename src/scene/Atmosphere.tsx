@@ -7,6 +7,8 @@ import { TIER_BUDGET, useSystemStore } from '@/stores/useSystemStore';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { WORLDS } from '@/core/constants/worlds';
 import { makeRandom } from '@/core/math/util';
+import { damp } from '@/core/math/spring';
+import { useModuleData } from '@/stores/useModuleData';
 
 /**
  * The room: volumetric dust, moving light shafts and a floor lattice.
@@ -224,6 +226,11 @@ function FloorLattice() {
       uOpacity: { value: 0 },
       uMotion: { value: 0 },
       uColor: { value: new THREE.Color('#5f8fd8') },
+      // 0 = the room's lattice, 1 = a live market grid. Blended rather than
+      // switched, so opening Stocks converts the floor instead of replacing it.
+      uMarket: { value: 0 },
+      // Eight normalised series values — the same holdings the card shows.
+      uSeries: { value: new Float32Array(8) },
     }),
     [],
   );
@@ -234,12 +241,40 @@ function FloorLattice() {
     const transform = useTransformStore.getState();
     const m = system.motionMultiplier;
     const u = material.current.uniforms;
+    // The grid's own animation is gated, but its SHAPE is not: a locked scene
+    // still shows the market grid, it just is not scrolling.
     if (m !== 0) u.uTime.value += dt * m;
     u.uMotion.value = m;
     u.uOpacity.value =
       (1 - transform.env.dissolve * 0.9) * (1 - transform.env.dim * 0.55) *
       Math.min(1, system.bootProgress * 1.4);
     u.uColor.value.set(WORLDS[system.world].keyLight);
+
+    /**
+     * THE FLOOR BECOMES AN ANIMATED MARKET GRID.
+     *
+     * Not a different floor — the same one, converted. The lattice fades down
+     * as the market grid fades up over the same square metres, so opening
+     * Stocks reads as the room being repurposed rather than as one object
+     * being swapped for another.
+     */
+    const wantMarket = system.world === 'market-grid' ? 1 : 0;
+    u.uMarket.value = damp(u.uMarket.value as number, wantMarket, 0.35, dt);
+
+    if (u.uMarket.value > 0.001) {
+      const holdings =
+        (useModuleData.getState().records.stocks?.detail as
+          | { holdings?: { value: number }[] }
+          | undefined)?.holdings ?? [];
+      const series = u.uSeries.value as Float32Array;
+      if (holdings.length > 0) {
+        let max = 0;
+        for (const h of holdings) max = Math.max(max, h.value);
+        for (let i = 0; i < series.length; i++) {
+          series[i] = max > 0 ? (holdings[i % holdings.length].value / max) : 0.5;
+        }
+      }
+    }
   });
 
   return (
@@ -266,6 +301,8 @@ function FloorLattice() {
           uniform float uTime;
           uniform float uOpacity;
           uniform float uMotion;
+          uniform float uMarket;
+          uniform float uSeries[8];
           uniform vec3 uColor;
           varying vec2 vUv;
           varying vec3 vWorld;
@@ -276,20 +313,70 @@ function FloorLattice() {
             return 1.0 - smoothstep(0.0, width, line);
           }
 
+          /**
+           * Lines along ONE axis.
+           *
+           * Not the 2D grid function with the other axis pinned to a constant:
+           * fwidth of a constant is zero, the division blows up, min() picks the
+           * zero, and it returns 1.0 for every pixel on the plane. That is how
+           * a market GRID became a solid teal slab across the whole floor.
+           */
+          float lines1d(float v, float scale, float width) {
+            float d = abs(fract(v * scale - 0.5) - 0.5) / max(fwidth(v * scale), 1e-5);
+            return 1.0 - smoothstep(0.0, width, d);
+          }
+
+          // Reads the series as a stepped bar height across x, so the grid
+          // carries the portfolio's actual shape rather than decorative noise.
+          float seriesAt(float x) {
+            float t = clamp((x + 12.0) / 24.0, 0.0, 0.999) * 8.0;
+            int i = int(t);
+            float v = 0.5;
+            for (int k = 0; k < 8; k++) { if (k == i) v = uSeries[k]; }
+            return v;
+          }
+
           void main() {
             vec2 p = vWorld.xz;
+            float r = length(p);
+            float falloff = smoothstep(22.0, 2.0, r);
+
+            // ---- the room's lattice --------------------------------------
             float fine = grid(p, 1.0, 1.4) * 0.16;
             float coarse = grid(p, 0.2, 1.1) * 0.34;
-
-            // A slow pulse travelling outward from the centre.
-            float r = length(p);
             float ripple = sin(r * 0.55 - uTime * 0.6) * 0.5 + 0.5;
             float pulse = smoothstep(0.75, 1.0, ripple) * 0.25 * uMotion;
+            float lattice = fine + coarse + pulse;
 
-            float falloff = smoothstep(22.0, 2.0, r);
-            float a = (fine + coarse + pulse) * falloff * uOpacity;
+            // ---- the market grid -----------------------------------------
+            // Columns across x, each lit to its holding's value, with lanes
+            // scrolling toward the viewer and a tick sweeping along the front.
+            //
+            // Every term here is a LINE, not a fill. The first version used a
+            // step on the distance from the centre for the bars, which is true
+            // across almost the whole plane — so the grid was a solid teal slab
+            // that flooded the lower half of the frame and blew out everything
+            // standing on it.
+            float columns = lines1d(p.x, 0.5, 2.2);
+            float height = seriesAt(p.x);
+            float lane = fract(p.y * 0.25 + uTime * 0.25);
+            float lanes = smoothstep(0.93, 1.0, lane) * 0.45;
+            float tick = smoothstep(0.994, 1.0, fract(p.x * 0.35 - uTime * 0.3)) * 0.7;
+            // Each column is lit to its holding's value, so the floor carries
+            // the portfolio's actual shape rather than a decorative pattern.
+            float market = clamp(
+              columns * (0.42 + height * 0.85) + lanes + tick,
+              0.0,
+              0.85
+            );
+
+            float a = mix(lattice, market, uMarket) * falloff * uOpacity;
             if (a < 0.002) discard;
-            gl_FragColor = vec4(uColor * a, a);
+
+            // The market grid leans green-cyan; the lattice keeps the world's
+            // own key colour.
+            vec3 tint = mix(uColor, vec3(0.42, 0.95, 0.82), uMarket * 0.7);
+            gl_FragColor = vec4(tint * a, a);
           }
         `}
       />

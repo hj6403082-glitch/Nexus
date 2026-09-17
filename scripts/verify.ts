@@ -19,6 +19,8 @@ import { envelopesFor } from '../src/stores/useTransformStore.ts';
 import { matchCommand } from '../src/ai/commands.ts';
 import { matchWorld, NAMED_WORLDS } from '../src/core/constants/worlds.ts';
 import { readCondition } from '../src/scene/env/condition.ts';
+import { TwoHandRecognizer } from '../src/gesture/recognizers.ts';
+import { telemetryRows } from '../src/stores/clientTelemetry.ts';
 import { VERBS, isVerb } from '../src/server/bridge/verbs.ts';
 
 let failures = 0;
@@ -230,6 +232,102 @@ check('follower deltas back-accumulate into the true curve', () => {
   const series = backAccumulate(1000, deltas);
   assert.deepEqual(series, [940, 950, 970, 1000]);
   assert.equal(series[series.length - 1], 1000, 'the curve must end at the known total');
+});
+
+console.log('\nTWO-HAND GESTURES');
+
+check('multi-select is told apart from zoom by dwell, not by pose', () => {
+  const held = (x: number, pinch: number) => ({
+    x,
+    y: 0,
+    z: 0.5,
+    pinch,
+    openness: 0.1,
+    present: true,
+  });
+
+  // Hands pinched and MOVING apart is a zoom, and must never select.
+  const zoomer = new TwoHandRecognizer();
+  let now = 0;
+  zoomer.detect(held(-0.3, 0.9), held(0.3, 0.9), now); // establishes the baseline
+  const zoomResults: string[] = [];
+  for (let i = 0; i < 40; i++) {
+    now += 50;
+    const spread = 0.3 + i * 0.02;
+    const r = zoomer.detect(held(-spread, 0.9), held(spread, 0.9), now);
+    if (r) zoomResults.push(r.name);
+  }
+  assert.ok(zoomResults.includes('two-hand-zoom'), 'moving apart did not zoom');
+  assert.ok(
+    !zoomResults.includes('two-hand-multi-select'),
+    'a zoom fired a multi-select on its way past',
+  );
+
+  // Hands pinched and HELD still selects, once, after the dwell.
+  const selector = new TwoHandRecognizer();
+  now = 0;
+  selector.detect(held(-0.3, 0.9), held(0.3, 0.9), now);
+  const selectResults: string[] = [];
+  for (let i = 0; i < 40; i++) {
+    now += 50;
+    const r = selector.detect(held(-0.3, 0.9), held(0.3, 0.9), now);
+    if (r) selectResults.push(r.name);
+  }
+  assert.deepEqual(
+    selectResults,
+    ['two-hand-multi-select'],
+    `held pinch produced ${JSON.stringify(selectResults)}`,
+  );
+});
+
+check('one hand alone can never fire a two-hand gesture', () => {
+  const r = new TwoHandRecognizer();
+  const present = { x: 0.2, y: 0, z: 0.5, pinch: 0.95, openness: 0.1, present: true };
+  const absent = { x: 0, y: 0, z: 0, pinch: 0, openness: 0, present: false };
+  for (let t = 0; t < 3000; t += 50) {
+    assert.equal(r.detect(present, absent, t), null);
+  }
+});
+
+console.log('\nSYSTEM TELEMETRY');
+
+check('the system card reports every signal the brief names', () => {
+  const rows = telemetryRows(
+    {
+      cores: 8,
+      deviceMemoryGb: 16,
+      battery: { level: 0.42, charging: false },
+      network: { type: '4g', downlinkMbps: 12 },
+      storage: { usedGb: 1.2, quotaGb: 120 },
+      gpu: 'Apple M3 Max',
+      fps: 60,
+    },
+    [],
+  );
+  const labels = rows.map((r) => r[0]);
+  for (const signal of ['cpu', 'gpu', 'battery', 'network', 'memory', 'storage']) {
+    assert.ok(labels.includes(signal), `${signal} is missing from the system card`);
+  }
+});
+
+check('a browser without these APIs still produces a card', () => {
+  const rows = telemetryRows(
+    {
+      cores: null,
+      deviceMemoryGb: null,
+      battery: null,
+      network: null,
+      storage: null,
+      gpu: 'unknown',
+      fps: 0,
+    },
+    [['heap', '61 MB']],
+  );
+  assert.equal(rows.length, 6);
+  // Missing signals say so rather than rendering "null" or vanishing.
+  assert.ok(rows.every(([, value]) => value.length > 0 && !value.includes('null')));
+  // Device memory falls back to what the server did report.
+  assert.equal(rows.find((r) => r[0] === 'memory')?.[1], '61 MB');
 });
 
 console.log('\nWEATHER');

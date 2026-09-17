@@ -2,15 +2,16 @@
   "name": "nexus",
   "version": "1.0.0",
   "private": true,
-  "description": "NEXUS — a spatial computing operating system for the web.",
+  "description": "NEXUS \u2014 a spatial computing operating system for the web.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "verify": "node --experimental-strip-types --import ./scripts/register.mjs scripts/verify.ts",
-    "verify:visual": "node scripts/verify-visual.mjs"
+    "verify": "node scripts/lint-shaders.mjs && node --experimental-strip-types --import ./scripts/register.mjs scripts/verify.ts",
+    "verify:visual": "node scripts/verify-visual.mjs",
+    "lint:shaders": "node scripts/lint-shaders.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
