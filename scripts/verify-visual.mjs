@@ -23,6 +23,7 @@
  */
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
+import { countPixels, readPng } from './png.mjs';
 
 const URL = process.env.NEXUS_URL ?? 'http://localhost:3000';
 const SHOTS = process.env.SHOTS ?? '.verify-shots';
@@ -81,6 +82,116 @@ check(
   a.angle === b.angle && JSON.stringify(a.camera) === JSON.stringify(b.camera),
   `angle ${a.angle} → ${b.angle}`,
 );
+
+// --- picking, on the pointer fallback --------------------------------------
+// The mouse exists only as a fallback, but a fallback that does not work is
+// not one: it has to hover, select and drag exactly as a hand does.
+await page.mouse.move(720, 450);
+await page.waitForTimeout(600);
+const hovered = await page.evaluate(() => window.__nexus().hovered);
+check('the centred card hovers under the pointer', Boolean(hovered), String(hovered));
+
+await page.mouse.move(720, 450);
+await page.mouse.down();
+await page.waitForTimeout(300);
+const dragging = await page.evaluate(() => window.__nexus().dragging);
+check('pressing a card starts a drag', Boolean(dragging), String(dragging));
+// Drag it well off its slot, then let go. The store knowing a drag is in
+// progress proves nothing about whether the card moved, so this reads the
+// card's actual world position.
+await page.mouse.move(980, 300, { steps: 18 });
+await page.waitForTimeout(1600);
+const dragged = await page.evaluate(() => window.__nexus().draggedAt);
+check(
+  'the dragged card follows the cursor off its slot',
+  Boolean(dragged) && dragged[1] > 0.25,
+  dragged ? `y = ${dragged[1].toFixed(2)}` : 'no card',
+);
+await page.screenshot({ path: `${SHOTS}/01b-drag.png` });
+await page.mouse.up();
+await page.waitForTimeout(1800);
+check(
+  'a released card returns to its orbit slot',
+  (await page.evaluate(() => window.__nexus().dragging)) === null,
+);
+
+// A click (press and release without travel) opens the module.
+await page.mouse.move(720, 450);
+await page.waitForTimeout(400);
+await page.mouse.click(720, 450);
+const opened = await until(
+  async () => (await page.evaluate(() => window.__nexus().open)) || null,
+  20_000,
+  700,
+);
+check('clicking a card opens its module', Boolean(opened), String(opened));
+
+// --- the in-scene stage ----------------------------------------------------
+const staged = await until(
+  async () => ((await page.evaluate(() => window.__nexus().focusPresence)) > 0.6 ? true : null),
+  20_000,
+  700,
+);
+check('the focused module raises its 3D stage', Boolean(staged));
+await page.screenshot({ path: `${SHOTS}/01c-focus-stage.png` });
+
+/**
+ * THE TYPE SURVIVES THE POST CHAIN.
+ *
+ * Reads actual pixels, because the bug this guards against was invisible to
+ * every state check: the colour grade sampled neighbours of the buffer it was
+ * writing, and the driver erased thin bright features. The stores all reported
+ * a perfectly open, perfectly painted card whose headline figure was no longer
+ * on screen.
+ */
+const faceShot = await page.screenshot({
+  clip: { x: 500, y: 40, width: 460, height: 580 },
+});
+const face = readPng(faceShot);
+// Accent-agnostic: the module spectrum runs violet to cyan, so this counts
+// BRIGHT SATURATED pixels rather than one hue. Before the halation fix this
+// region measured in the low tens; with the type intact it is thousands.
+const bright = countPixels(face, (r, g, b) => {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  return max > 150 && max - min > 60;
+});
+check(
+  'bright accent type survives the post chain',
+  bright > 800,
+  `${bright} bright saturated pixels`,
+);
+
+// --- environments ----------------------------------------------------------
+await page.keyboard.press('Meta+k');
+await page.waitForTimeout(700);
+await page.click(PALETTE);
+await page.type(PALETTE, 'Fog Chamber', { delay: 40 });
+await page.keyboard.press('Enter');
+const fog = await until(
+  async () => ((await page.evaluate(() => window.__nexus().world)) === 'fog-chamber' ? true : null),
+  20_000,
+  600,
+);
+check('an environment can be switched by name', Boolean(fog));
+await page.waitForTimeout(2500);
+await page.screenshot({ path: `${SHOTS}/01d-fog-chamber.png` });
+
+// --- the weather world reflects the weather --------------------------------
+await page.keyboard.press('Meta+k');
+await page.waitForTimeout(700);
+await page.click(PALETTE);
+await page.type(PALETTE, 'weather', { delay: 40 });
+await page.keyboard.press('Enter');
+const weather = await until(
+  async () =>
+    (await page.evaluate(() => window.__nexus().world)) === 'weather-reactive' ? true : null,
+  30_000,
+  700,
+);
+check('opening weather morphs the world to match it', Boolean(weather));
+await page.waitForTimeout(3500);
+await page.screenshot({ path: `${SHOTS}/01e-weather.png` });
 
 // --- presentation ----------------------------------------------------------
 await page.keyboard.press('Meta+k');

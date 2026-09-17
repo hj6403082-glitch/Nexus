@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
+import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import {
   Bloom,
@@ -17,6 +18,7 @@ import { useTransformStore } from '@/stores/useTransformStore';
 import { useCarouselStore } from '@/stores/useCarouselStore';
 import { CAROUSEL_RADIUS } from '../Carousel';
 import { ColorGradeEffect } from './ColorGradeEffect';
+import { HalationEffect } from './HalationEffect';
 
 export function PostChain() {
   const tier = useSystemStore((s) => s.tier);
@@ -32,13 +34,28 @@ export function PostChain() {
   const embodied = useTransformStore((s) => s.env.presence > 0.5);
 
   const grade = useMemo(() => new ColorGradeEffect(WORLDS['minimal-studio']), []);
-  const dofRef = useRef<{ target?: unknown; circleOfConfusionMaterial?: { uniforms: Record<string, { value: number }> } } | null>(null);
+  const halation = useMemo(() => new HalationEffect(WORLDS['minimal-studio'].halation), []);
+  /**
+   * The depth-of-field effect, so its focus distance can be written directly.
+   * `postprocessing` has renamed this material across versions, so both names
+   * are accepted rather than pinning the app to one of them.
+   */
+  const dofRef = useRef<{
+    circleOfConfusionMaterial?: { uniforms: Record<string, { value: number }> };
+    cocMaterial?: { uniforms: Record<string, { value: number }> };
+  } | null>(null);
   const focus = useRef(CAROUSEL_RADIUS);
   const vignette = useRef(0.55);
 
-  useEffect(() => () => grade.dispose(), [grade]);
+  useEffect(
+    () => () => {
+      grade.dispose();
+      halation.dispose();
+    },
+    [grade, halation],
+  );
 
-  useFrame((_, rawDelta) => {
+  useFrame((state, rawDelta) => {
     const dt = Math.min(rawDelta, 1 / 20);
     const system = useSystemStore.getState();
     const transform = useTransformStore.getState();
@@ -63,6 +80,37 @@ export function PostChain() {
     vignette.current = damp(vignette.current, targetVignette, 0.25, dt);
 
     grade.apply(blended, vignette.current);
+    halation.amount = blended.halation;
+
+    /**
+     * THE FOCUS DISTANCE FOLLOWS THE SUBJECT.
+     *
+     * A fixed focus distance is only correct while nothing moves. The moment a
+     * module is opened the card flies toward the camera AND the camera pushes
+     * to meet it, so the card ends up well inside the focal plane — in the
+     * NEAR field, which is the worst place to be: the near-field pass smears
+     * high-contrast pixels outward, and on a dark card face that reads as the
+     * bright type being erased rather than blurred. The headline figure and
+     * the sparkline simply vanished, while the dimmer body text survived.
+     *
+     * So the focus distance is recomputed each frame from where the subject
+     * actually is, and damped so a rack focus is a rack focus rather than a
+     * jump.
+     */
+    const camera = state.camera;
+    const carousel = useCarouselStore.getState();
+    const subjectZ = carousel.open
+      ? carousel.radius - 0.5 // the focused card's own push toward the camera
+      : carousel.radius;
+    const subject = Math.abs(subjectZ - camera.position.z);
+    focus.current = damp(focus.current, subject, 0.22, dt);
+
+    const coc = dofRef.current?.circleOfConfusionMaterial ?? dofRef.current?.cocMaterial;
+    if (coc?.uniforms.focusDistance) {
+      // The uniform is normalised against the camera's far plane.
+      const far = (camera as THREE.PerspectiveCamera).far || 80;
+      coc.uniforms.focusDistance.value = focus.current / far;
+    }
   });
 
   return (
@@ -70,12 +118,12 @@ export function PostChain() {
       {budget.dof && !embodied ? (
         <DepthOfField
           ref={dofRef as never}
-          // Normalised against the camera's far plane (80), so this is the
-          // ring at ~4.4 units. Focusing anywhere else puts the one card the
-          // user is reading behind the blur.
+          // Initial value only — the focus distance TRACKS THE SUBJECT every
+          // frame. See the frame loop below for why a fixed one is not an
+          // option.
           focusDistance={4.4 / 80}
-          focalLength={0.08}
-          bokehScale={0.9}
+          focalLength={0.14}
+          bokehScale={0.8}
         />
       ) : (
         <></>
@@ -94,6 +142,11 @@ export function PostChain() {
       ) : (
         <></>
       )}
+      {/*
+        Halation goes FIRST and alone in its own pass: it is a convolution, so
+        the buffer it samples must not be the buffer it writes.
+      */}
+      <primitive object={halation} />
       <primitive object={grade} />
       <Noise premultiply blendFunction={BlendFunction.SOFT_LIGHT} opacity={0.055} />
     </EffectComposer>

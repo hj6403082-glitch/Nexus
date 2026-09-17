@@ -9,6 +9,7 @@ import type { ModuleDef } from '@/core/constants/modules';
 import { advanceSpring, damp, makeSpring } from '@/core/math/spring';
 import { clamp01, hash11, smoothstep } from '@/core/math/util';
 import { useCarouselStore, type CardState } from '@/stores/useCarouselStore';
+import { useGestureStore } from '@/stores/useGestureStore';
 import { useSystemStore } from '@/stores/useSystemStore';
 import { useModuleData } from '@/stores/useModuleData';
 import { useTransformStore } from '@/stores/useTransformStore';
@@ -25,14 +26,21 @@ const CARD_H = CARD_W / (FACE_W / FACE_H);
  */
 const STATE_POSE: Record<
   CardState,
-  { scale: number; push: number; tilt: number; glow: number }
+  { scale: number; push: number; tilt: number; glow: number; lift: number }
 > = {
-  idle: { scale: 1.0, push: 0, tilt: 0, glow: 0.0 },
-  hovered: { scale: 1.045, push: 0.10, tilt: 0.06, glow: 0.35 },
-  selected: { scale: 1.09, push: 0.22, tilt: 0.0, glow: 0.8 },
-  expanded: { scale: 1.32, push: 0.55, tilt: 0.0, glow: 0.6 },
-  focused: { scale: 1.5, push: 0.95, tilt: 0.0, glow: 1.0 },
-  dragging: { scale: 1.12, push: 0.34, tilt: 0.14, glow: 0.7 },
+  idle: { scale: 1.0, push: 0, tilt: 0, glow: 0.0, lift: 0 },
+  hovered: { scale: 1.045, push: 0.10, tilt: 0.06, glow: 0.35, lift: 0.02 },
+  selected: { scale: 1.09, push: 0.22, tilt: 0.0, glow: 0.8, lift: 0.04 },
+  expanded: { scale: 1.32, push: 0.55, tilt: 0.0, glow: 0.6, lift: 0.18 },
+  /**
+   * Focused is deliberately less aggressive than it first was (1.5 / 0.95),
+   * and it LIFTS. At the original size the card filled the frame; even sized
+   * down it sat dead centre, so the module's own 3D stage had nowhere to stand
+   * that was not across the card's face. Raising the card clears the lower
+   * third of the frame for it.
+   */
+  focused: { scale: 1.22, push: 0.5, tilt: 0.0, glow: 1.0, lift: 0.42 },
+  dragging: { scale: 1.12, push: 0.34, tilt: 0.14, glow: 0.7, lift: 0.06 },
 };
 
 interface CardProps {
@@ -45,11 +53,14 @@ interface CardProps {
 export function Card({ module, index, count, radius }: CardProps) {
   const group = useRef<THREE.Group>(null);
   const inner = useRef<THREE.Group>(null);
+  const face = useRef<THREE.Mesh>(null);
   const frameMat = useRef<THREE.ShaderMaterial>(null);
   const faceMat = useRef<THREE.MeshBasicMaterial>(null);
 
   const seed = useMemo(() => hash11(index * 17.3 + 4.1), [index]);
   const slotAngle = (index / count) * Math.PI * 2;
+  // The ring's own radius is sprung so a two-hand zoom glides rather than snaps.
+  const ringRadius = useMemo(() => makeSpring(radius), [radius]);
 
   // Springs. One per animated channel; every one of them is a named intent.
   const springs = useMemo(
@@ -58,8 +69,15 @@ export function Card({ module, index, count, radius }: CardProps) {
       push: makeSpring(0),
       tilt: makeSpring(0),
       glow: makeSpring(0),
+      lift: makeSpring(0),
       opacity: makeSpring(0),
       pulse: makeSpring(1),
+      // Drag offset from the orbit slot, in world space. Under-damped, so a
+      // card lags behind the hand, overshoots slightly when the hand stops,
+      // and settles elastically — which is what mass does.
+      dragX: makeSpring(0),
+      dragY: makeSpring(0),
+      dragZ: makeSpring(0),
     }),
     [],
   );
@@ -96,6 +114,15 @@ export function Card({ module, index, count, radius }: CardProps) {
     return () => cardRegistry.unregister(module.id);
   }, [painter, module.id, index]);
 
+  // The face mesh is the pick target, and it carries its own id so the picker
+  // does not need a parallel lookup from object back to module.
+  useEffect(() => {
+    const mesh = face.current;
+    if (!mesh) return;
+    mesh.userData.moduleId = module.id;
+    cardRegistry.attachMesh(module.id, mesh);
+  }, [module.id]);
+
   const accent = ACCENTS[module.accent];
 
   const frameUniforms = useMemo(() => {
@@ -130,9 +157,12 @@ export function Card({ module, index, count, radius }: CardProps) {
     }
 
     const pose = STATE_POSE[cardState];
+    advanceSpring(ringRadius, carousel.radius, MOTION.ARRIVING, dt);
 
     // --- slot on the ring --------------------------------------------------
-    const worldAngle = slotAngle + carousel.angle;
+    // Spread fans or tightens the angular spacing (two-hand group / split);
+    // radius pulls the whole orbit in or out (two-hand zoom).
+    const worldAngle = slotAngle * carousel.spread + carousel.angle;
 
     /**
      * Centredness: 1 when this card faces the user, 0 for everything else.
@@ -165,6 +195,7 @@ export function Card({ module, index, count, radius }: CardProps) {
     advanceSpring(springs.push, pose.push, MOTION.ARRIVING, dt);
     advanceSpring(springs.tilt, pose.tilt, MOTION.ACKNOWLEDGING, dt);
     advanceSpring(springs.glow, pose.glow, MOTION.ACKNOWLEDGING, dt);
+    advanceSpring(springs.lift, pose.lift, MOTION.ARRIVING, dt);
     advanceSpring(springs.pulse, 1, MOTION.LEAVING, dt);
 
     // Cards fade out behind the dissolve envelope during the transformation.
@@ -177,11 +208,32 @@ export function Card({ module, index, count, radius }: CardProps) {
     springs.opacity.value = damp(springs.opacity.value, targetOpacity, 0.12, dt);
 
     // --- place -------------------------------------------------------------
-    const effectiveRadius = radius + stepBack - springs.push.value + (m === 0 ? 0 : swayX);
+    const effectiveRadius =
+      ringRadius.value + stepBack - springs.push.value + (m === 0 ? 0 : swayX);
+    const slotX = Math.sin(worldAngle) * effectiveRadius;
+    const slotY = bob + springs.lift.value;
+    const slotZ = Math.cos(worldAngle) * effectiveRadius;
+
+    /**
+     * DRAGGING. The card chases the cursor, and it chases it on an
+     * UNDER-DAMPED spring — so it trails behind the hand, overshoots when the
+     * hand stops, and settles elastically rather than being welded to it.
+     *
+     * On release the target simply becomes the orbit slot again and the SAME
+     * spring carries it home, with whatever velocity it had. The card is never
+     * handed to a physics simulation: a thrown card has to be found again, and
+     * "where did it go" is a chore, not an interaction.
+     */
+    const cursor = useGestureStore.getState().cursor;
+    const dragging = carousel.dragging === module.id && cursor.live;
+    advanceSpring(springs.dragX, dragging ? cursor.x - slotX : 0, MOTION.ARRIVING, dt);
+    advanceSpring(springs.dragY, dragging ? cursor.y - slotY : 0, MOTION.ARRIVING, dt);
+    advanceSpring(springs.dragZ, dragging ? cursor.z - slotZ : 0, MOTION.ARRIVING, dt);
+
     g.position.set(
-      Math.sin(worldAngle) * effectiveRadius,
-      bob,
-      Math.cos(worldAngle) * effectiveRadius,
+      slotX + springs.dragX.value,
+      slotY + springs.dragY.value,
+      slotZ + springs.dragZ.value,
     );
     // + PI so the face turns INWARD, toward the user at the centre of the ring.
     // Without it the planes face outward and, being double-sided, render their
@@ -237,7 +289,7 @@ export function Card({ module, index, count, radius }: CardProps) {
     <group ref={group}>
       <group ref={inner}>
         {/* Glass pane — the body of the card. */}
-        <mesh>
+        <mesh ref={face}>
           <planeGeometry args={[CARD_W, CARD_H]} />
           <meshBasicMaterial
             ref={faceMat}

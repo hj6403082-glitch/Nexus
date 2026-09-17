@@ -5,6 +5,8 @@ import type { CardFacePainter } from './CardFacePainter';
 export interface CardHandle {
   painter: CardFacePainter;
   index: number;
+  /** The face mesh, for picking. */
+  mesh?: THREE.Object3D;
   /**
    * Published every frame by the carousel. The dissolve needs the card's world
    * transform at the instant it samples, so the particles sit on the face
@@ -23,6 +25,18 @@ class CardRegistry {
 
   register(id: ModuleId, handle: CardHandle): void {
     this.handles.set(id, { ...handle, matrix: new THREE.Matrix4() });
+  }
+
+  attachMesh(id: ModuleId, mesh: THREE.Object3D): void {
+    const h = this.handles.get(id);
+    if (h) h.mesh = mesh;
+  }
+
+  /** Every card face currently in the scene, for the picker's raycast. */
+  pickTargets(): THREE.Object3D[] {
+    const out: THREE.Object3D[] = [];
+    for (const h of this.handles.values()) if (h.mesh) out.push(h.mesh);
+    return out;
   }
 
   unregister(id: ModuleId): void {

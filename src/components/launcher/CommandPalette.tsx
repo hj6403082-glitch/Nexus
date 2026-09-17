@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { MODULES } from '@/core/constants/modules';
+import { NAMED_WORLDS } from '@/core/constants/worlds';
 import { bridgeCapabilities, callBridge } from '@/ai/bridgeClient';
 import { useSystemStore } from '@/stores/useSystemStore';
+import { useLenis } from '@/hooks/useLenis';
 import { rank, type Rankable } from './rank';
 import { BEAT } from '@/core/constants/motion';
 
@@ -50,6 +52,8 @@ export function CommandPalette({ onCommand }: PaletteProps) {
   const [apps, setApps] = useState<string[]>([]);
   const [bridgeEnabled, setBridgeEnabled] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  useLenis(listRef, open);
 
   useEffect(() => {
     void bridgeCapabilities().then((c) => {
@@ -98,6 +102,12 @@ export function CommandPalette({ onCommand }: PaletteProps) {
       { id: 'cmd:capture', label: 'Capture the screen', source: 'command' },
       { id: 'cmd:clipboard', label: 'Read the clipboard', source: 'command' },
       { id: 'cmd:hide', label: 'Hide other applications', source: 'command' },
+      ...NAMED_WORLDS.map((w) => ({
+        id: `world:${w.id}`,
+        label: w.label,
+        source: 'command' as const,
+        detail: 'environment',
+      })),
     ];
     return [...modules, ...commands, ...installed, ...SITES];
   }, [apps]);
@@ -108,6 +118,7 @@ export function CommandPalette({ onCommand }: PaletteProps) {
     setOpen(false);
     const [kind, value] = item.id.split(':');
 
+    if (kind === 'world') return onCommand(`switch to the ${value.replace(/-/g, ' ')} world`);
     if (kind === 'module') return onCommand(`open ${value}`);
     if (kind === 'app') return onCommand(`open ${value}`);
     if (kind === 'site') {
@@ -189,7 +200,10 @@ export function CommandPalette({ onCommand }: PaletteProps) {
               placeholder="Ask, open, or command…"
               className="w-full bg-transparent px-5 py-4 text-[15px] text-nexus-ink outline-none placeholder:text-nexus-dim/60"
             />
-            <div className="max-h-[52vh] overflow-y-auto border-t border-white/[0.06]">
+            <div
+              ref={listRef}
+              className="max-h-[52vh] overflow-y-auto border-t border-white/[0.06]"
+            >
               {results.map((item, i) => (
                 <button
                   key={item.id}

@@ -55,6 +55,17 @@ interface GestureState {
   /** Pointer fallback, in the same -1..1 space as a hand. */
   pointer: { x: number; y: number; active: boolean };
   setPointer: (x: number, y: number, active: boolean) => void;
+
+  /**
+   * The active input resolved into a world-space point on the ring, published
+   * by the picker once per frame.
+   *
+   * Hand and pointer are deliberately collapsed into ONE value here: a dragged
+   * card should not care which of them is driving it, and the moment it does,
+   * every consumer needs two code paths that will drift apart.
+   */
+  cursor: { x: number; y: number; z: number; live: boolean };
+  setCursor: (x: number, y: number, z: number, live: boolean) => void;
 }
 
 export const useGestureStore = create<GestureState>()((set) => ({
@@ -72,4 +83,7 @@ export const useGestureStore = create<GestureState>()((set) => ({
 
   pointer: { x: 0, y: 0, active: false },
   setPointer: (x, y, active) => set({ pointer: { x, y, active } }),
+
+  cursor: { x: 0, y: 0, z: 0, live: false },
+  setCursor: (x, y, z, live) => set({ cursor: { x, y, z, live } }),
 }));

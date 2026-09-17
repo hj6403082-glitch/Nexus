@@ -17,6 +17,8 @@ import { backAccumulate, detectFlavour } from '../src/server/data/instagram.ts';
 import { rank } from '../src/components/launcher/rank.ts';
 import { envelopesFor } from '../src/stores/useTransformStore.ts';
 import { matchCommand } from '../src/ai/commands.ts';
+import { matchWorld, NAMED_WORLDS } from '../src/core/constants/worlds.ts';
+import { readCondition } from '../src/scene/env/condition.ts';
 import { VERBS, isVerb } from '../src/server/bridge/verbs.ts';
 
 let failures = 0;
@@ -151,6 +153,32 @@ check('an open question is not mistaken for a command', () => {
   assert.equal(matchCommand('Explain MCP').kind, 'ask');
 });
 
+check('environments are named places, not modules', () => {
+  assert.deepEqual(matchCommand('take me to the fog chamber'), {
+    kind: 'environment',
+    world: 'fog-chamber',
+  });
+  assert.deepEqual(matchCommand('switch to the ocean platform'), {
+    kind: 'environment',
+    world: 'open-water',
+  });
+  // "go to the" is also a module opener, so the environment branch must not
+  // swallow a module: it only fires when a world actually matches.
+  assert.deepEqual(matchCommand('go to the stocks module'), {
+    kind: 'open',
+    module: 'stocks',
+  });
+});
+
+check('every named world resolves from its own label and aliases', () => {
+  for (const world of NAMED_WORLDS) {
+    assert.equal(matchWorld(world.label), world.id, `${world.label} did not resolve`);
+    for (const alias of world.aliases) {
+      assert.ok(matchWorld(alias), `alias "${alias}" resolved to nothing`);
+    }
+  }
+});
+
 console.log('\nDESKTOP BRIDGE — injection');
 
 check('an injected command string is not a verb', () => {
@@ -202,6 +230,22 @@ check('follower deltas back-accumulate into the true curve', () => {
   const series = backAccumulate(1000, deltas);
   assert.deepEqual(series, [940, 950, 970, 1000]);
   assert.equal(series[series.length - 1], 1000, 'the curve must end at the known total');
+});
+
+console.log('\nWEATHER');
+
+check('every condition the API reports maps to something drawable', () => {
+  assert.equal(readCondition('Thunderstorm'), 'storm');
+  assert.equal(readCondition('light rain'), 'rain');
+  assert.equal(readCondition('Drizzle'), 'rain');
+  assert.equal(readCondition('Snow'), 'snow');
+  assert.equal(readCondition('Mist'), 'fog');
+  assert.equal(readCondition('haze'), 'fog');
+  assert.equal(readCondition('broken clouds'), 'clouds');
+  // Anything unrecognised is clear rather than undefined: a missing profile
+  // would be an empty sky AND a shader reading undefined uniforms.
+  assert.equal(readCondition('something new'), 'clear');
+  assert.equal(readCondition(undefined), 'clear');
 });
 
 console.log('\n⌘K RANKING');

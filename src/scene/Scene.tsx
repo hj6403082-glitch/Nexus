@@ -4,7 +4,11 @@ import { Suspense, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Atmosphere } from './Atmosphere';
+import { Precipitation } from './env/Precipitation';
 import { Carousel } from './Carousel';
+import { GestureTrail } from './GestureTrail';
+import { Picker } from './Picker';
+import { FocusStage } from './focus/FocusStage';
 import { PresentationClock } from './PresentationClock';
 import { TargetingBracket } from './TargetingBracket';
 import { Rig } from './Rig';
@@ -14,6 +18,8 @@ import { PresentingHand } from './human/PresentingHand';
 import { WORLDS } from '@/core/constants/worlds';
 import { useSystemStore } from '@/stores/useSystemStore';
 import { useCarouselStore } from '@/stores/useCarouselStore';
+import { useGestureStore } from '@/stores/useGestureStore';
+import { cardRegistry } from './cardRegistry';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { damp } from '@/core/math/spring';
 
@@ -70,8 +76,12 @@ function SceneBody() {
 
       <Suspense fallback={null}>
         <Atmosphere />
+        <Precipitation />
         <Carousel />
+        <Picker />
+        <GestureTrail />
         <TargetingBracket />
+        <FocusStage />
         <HumanForm />
         <PresentingHand />
       </Suspense>
@@ -107,6 +117,27 @@ function Probe() {
       },
       motionMultiplier: useSystemStore.getState().motionMultiplier,
       tier: useSystemStore.getState().tier,
+      world: useSystemStore.getState().world,
+      hovered: useCarouselStore.getState().hovered,
+      dragging: useCarouselStore.getState().dragging,
+      open: useCarouselStore.getState().open,
+      focusPresence: useCarouselStore.getState().focusPresence,
+      ring: {
+        radius: useCarouselStore.getState().radius,
+        spread: useCarouselStore.getState().spread,
+      },
+      cursor: useGestureStore.getState().cursor,
+      // Where the dragged card actually IS. The store knowing a drag is in
+      // progress proves nothing about whether the card moved, and the first
+      // version of the drag passed a store-only check while the card sat
+      // perfectly still in its slot.
+      draggedAt: (() => {
+        const id = useCarouselStore.getState().dragging;
+        const mesh = id ? cardRegistry.get(id)?.mesh : undefined;
+        if (!mesh) return null;
+        mesh.updateWorldMatrix(true, false);
+        return mesh.getWorldPosition(new THREE.Vector3()).toArray();
+      })(),
       transform: useTransformStore.getState().phase,
       log: useSystemStore.getState().log.map((l) => l.text),
     });

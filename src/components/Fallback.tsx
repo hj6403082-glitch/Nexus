@@ -3,7 +3,8 @@
 import { MODULES } from '@/core/constants/modules';
 import { ACCENTS } from '@/core/constants/palette';
 import { useModuleData } from '@/stores/useModuleData';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { useLenis } from '@/hooks/useLenis';
 
 /**
  * GRACEFUL FALLBACK.
@@ -15,12 +16,17 @@ import { useEffect } from 'react';
  */
 export function Fallback({ reason }: { reason: string }) {
   const records = useModuleData((s) => s.records);
+  const scroller = useRef<HTMLElement>(null);
+  useLenis(scroller);
   useEffect(() => {
     void useModuleData.getState().loadAll();
   }, []);
 
   return (
-    <main className="min-h-dvh bg-nexus-void px-6 py-10 text-nexus-ink">
+    <main
+      ref={scroller}
+      className="h-dvh overflow-y-auto bg-nexus-void px-6 py-10 text-nexus-ink"
+    >
       <header className="mx-auto mb-10 max-w-5xl">
         <h1 className="font-mono text-[13px] tracking-[0.4em]">NEXUS</h1>
         <p className="mt-2 max-w-prose text-[13px] text-nexus-dim">

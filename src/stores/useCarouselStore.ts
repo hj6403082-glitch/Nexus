@@ -15,6 +15,17 @@ export type CardState =
 export type PresentPhase = 'none' | 'targeting' | 'approach' | 'settle';
 
 interface CarouselState {
+  /**
+   * Ring geometry. Two-hand gestures reshape the ring rather than throwing
+   * cards around in it: zoom pulls the whole orbit toward or away from you,
+   * and group/split tightens or fans the angular spacing.
+   */
+  radius: number;
+  spread: number;
+  zoom: (ratio: number) => void;
+  setSpread: (spread: number) => void;
+  resetRing: () => void;
+
   /** Authoritative carousel angle in radians. Written only by the rig. */
   angle: number;
   /** Where the carousel wants to be. The spring closes the gap. */
@@ -41,6 +52,18 @@ interface CarouselState {
   presentT: number;
   setPresent: (phase: PresentPhase, t: number) => void;
 
+  /**
+   * How present the focused module's in-scene stage is, 0..1.
+   *
+   * Written by FocusStage — which is the clock for that sequence — and read by
+   * everything it contains. The alternative was for the stage to reach into
+   * its children's materials each frame and clamp their opacity, which fights
+   * whatever those children are doing to their own opacity and depends on
+   * which useFrame happens to run first.
+   */
+  focusPresence: number;
+  setFocusPresence: (v: number) => void;
+
   present: (id: ModuleId) => void;
   /**
    * A deliberate gesture during a sequence cancels the choreography — but
@@ -62,7 +85,24 @@ interface CarouselState {
 
 const STEP = (Math.PI * 2) / MODULES.length;
 
+export const RING = {
+  RADIUS: 4.2,
+  MIN_RADIUS: 3.1,
+  MAX_RADIUS: 6.4,
+  MIN_SPREAD: 0.55,
+  MAX_SPREAD: 1.6,
+} as const;
+
+const clampRange = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
 export const useCarouselStore = create<CarouselState>()((set, get) => ({
+  radius: RING.RADIUS,
+  spread: 1,
+  zoom: (ratio) =>
+    set((s) => ({ radius: clampRange(s.radius * ratio, RING.MIN_RADIUS, RING.MAX_RADIUS) })),
+  setSpread: (spread) => set({ spread: clampRange(spread, RING.MIN_SPREAD, RING.MAX_SPREAD) }),
+  resetRing: () => set({ radius: RING.RADIUS, spread: 1 }),
+
   angle: 0,
   targetAngle: 0,
   angleVelocity: 0,
@@ -94,6 +134,9 @@ export const useCarouselStore = create<CarouselState>()((set, get) => ({
   presentPhase: 'none',
   presentT: 0,
   setPresent: (presentPhase, presentT) => set({ presentPhase, presentT }),
+
+  focusPresence: 0,
+  setFocusPresence: (focusPresence) => set({ focusPresence }),
 
   present: (id) => {
     get().rotateTo(id);

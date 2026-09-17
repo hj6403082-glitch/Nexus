@@ -154,6 +154,29 @@ export const WORLDS: Record<WorldId, WorldGrade> = {
 export const DEFAULT_WORLD: WorldId = 'minimal-studio';
 
 /**
+ * The six environments a person can ask for by name. The other two —
+ * `market-grid` and `weather-reactive` — are consequences of opening a module,
+ * not places you choose to stand, so they are not in this list.
+ */
+export const NAMED_WORLDS: { id: WorldId; label: string; aliases: string[] }[] = [
+  { id: 'minimal-studio', label: 'Minimal Studio', aliases: ['studio', 'minimal', 'default'] },
+  { id: 'dark-lab', label: 'Dark Lab', aliases: ['lab', 'dark'] },
+  { id: 'glass-observatory', label: 'Glass Observatory', aliases: ['observatory', 'glass'] },
+  { id: 'industrial-deck', label: 'Industrial Deck', aliases: ['industrial', 'deck', 'command center', 'command centre'] },
+  { id: 'open-water', label: 'Open Water', aliases: ['ocean', 'water', 'ocean platform', 'blue hour'] },
+  { id: 'fog-chamber', label: 'Fog Chamber', aliases: ['fog', 'chamber', 'mist'] },
+];
+
+export function matchWorld(text: string): WorldId | null {
+  const t = text.toLowerCase();
+  for (const w of NAMED_WORLDS) {
+    if (t.includes(w.label.toLowerCase())) return w.id;
+    for (const alias of w.aliases) if (t.includes(alias)) return w.id;
+  }
+  return null;
+}
+
+/**
  * Spike the split and halation at the crossover so the world change reads as a
  * cut. `t` is 0 at the outgoing world, 1 at the incoming one; the spike peaks
  * at t = 0.5 and is gone at both ends.

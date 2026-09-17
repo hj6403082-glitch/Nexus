@@ -292,9 +292,30 @@ export async function music(): Promise<ModulePayload> {
 // -------------------------------------------------------------- projects ---
 export async function projects(): Promise<ModulePayload> {
   const items = [
-    { name: 'NEXUS', status: 'active', repo: 'krishiyswim23-swagger/Nexus_AI' },
-    { name: 'Volumetric study', status: 'paused', repo: '—' },
-    { name: 'Gesture latency harness', status: 'active', repo: '—' },
+    {
+      name: 'NEXUS',
+      status: 'active',
+      repo: 'krishiyswim23-swagger/Nexus_AI',
+      description: 'Spatial operating system. Ring, gestures, voice, human form.',
+      media: ['boot.mp4', 'ring.png', 'transform.mp4'],
+      prompts: ['make the cards erode edge-first as their particles leave'],
+    },
+    {
+      name: 'Volumetric study',
+      status: 'paused',
+      repo: '—',
+      description: 'Single-light fog chamber. Halation and sub-1.0 contrast.',
+      media: ['fog-01.png', 'fog-02.png'],
+      prompts: ['contrast below one, because fog is a low-contrast medium'],
+    },
+    {
+      name: 'Gesture latency harness',
+      status: 'active',
+      repo: '—',
+      description: 'Measures hand-to-photon latency across tracking backends.',
+      media: ['trace.png'],
+      prompts: ['schmitt-trigger the pinch, one threshold chatters'],
+    },
   ];
   return {
     provenance: 'sample',

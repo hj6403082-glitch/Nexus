@@ -51,7 +51,8 @@ export function Rig() {
       // The push RELAXES during settle rather than snapping back.
       pushTarget = 1.05 * (1 - smootherstep(0, 1, carousel.presentT) * 0.35);
     } else if (carousel.open) {
-      pushTarget = 0.68;
+      // Enough to commit to the module, not so much that its stage is cropped.
+      pushTarget = 0.42;
     }
     advanceSpring(push, pushTarget, carousel.presentPhase === 'approach' ? MOTION.ARRIVING : MOTION.LEAVING, dt);
 

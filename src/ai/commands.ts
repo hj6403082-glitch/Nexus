@@ -1,4 +1,5 @@
-import { MODULES, type ModuleId } from '@/core/constants/modules';
+import { MODULES, type ModuleId, type WorldId } from '@/core/constants/modules';
+import { matchWorld } from '@/core/constants/worlds';
 
 export type Command =
   | { kind: 'open'; module: ModuleId }
@@ -9,6 +10,7 @@ export type Command =
   | { kind: 'launch'; app: string }
   | { kind: 'browse'; query: string }
   | { kind: 'media'; verb: 'play' | 'pause' | 'next' | 'previous' }
+  | { kind: 'environment'; world: WorldId }
   | { kind: 'ask'; text: string };
 
 /**
@@ -54,6 +56,14 @@ export function matchCommand(raw: string): Command {
   if (/^(pause|stop)\b/.test(text)) return { kind: 'media', verb: 'pause' };
   if (/\b(next|skip) (track|song)\b/.test(text)) return { kind: 'media', verb: 'next' };
   if (/\b(previous|last) (track|song)\b/.test(text)) return { kind: 'media', verb: 'previous' };
+
+  // --- environments --------------------------------------------------------
+  // Checked BEFORE modules, because "show me the lab" names a place and
+  // "open projects" names a module, and the opener verb is the same word.
+  if (/\b(environment|world|room|take me to|switch to|go to the)\b/.test(text)) {
+    const world = matchWorld(text);
+    if (world) return { kind: 'environment', world };
+  }
 
   // --- modules ------------------------------------------------------------
   const opener = /\b(open|show|bring up|go to|display|launch)\b/.test(text);

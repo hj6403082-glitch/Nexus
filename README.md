@@ -23,10 +23,10 @@ Built in seven passes, each extending the last rather than replacing it.
 
 | | |
 |---|---|
-| **1 — Foundation** | The room, the ring, ten glass cards with live data, MediaPipe hand tracking, spring physics, adaptive quality, synthesised audio, a four-corner HUD. |
+| **1 — Foundation** | The room, the ring, ten glass cards with live data, MediaPipe hand tracking, hover/select/drag on hand or pointer, spring physics, adaptive quality, synthesised audio, a four-corner HUD. |
 | **2 — AI brain** | Streaming Gemini through a server proxy, `SpeechRecognition` with barge-in interruption, speech that starts before the response finishes, holographic text that assembles from scattered words. |
-| **3 — Knowledge** | Real adapters for Instagram, stocks, weather and news; sample adapters for the rest. Every figure carries provenance and age. |
-| **4 — Worlds** | Six environments, cinematic module transitions, two-hand gestures. |
+| **3 — Knowledge** | Real adapters for Instagram, stocks, weather and news; sample adapters for the rest. Opening a module raises a 3D stage: a chart that stands up off the floor, a deck of articles you swipe through, a constellation of project worlds. Every figure carries provenance and age. |
+| **4 — Worlds** | Six named environments switchable by voice or ⌘K, a weather world with real precipitation, cinematic module transitions, light trails on every gesture, two-hand zoom / group / split. |
 | **5 — Desktop bridge** | A hardened local API that launches apps, opens windows on a chosen display, and drives media — macOS only, off by default. A ⌘K palette over apps, sites and commands. |
 | **6 — Stillness** | Ambient motion off by default and gated on a multiplier; one master clock for module presentation; six filmic colour grades; gold for the centred card, isolated from warning orange. |
 | **7 — The human form** | The cards dissolve into particles, gather, and reassemble as a signed-distance bust that breathes, watches you, speaks, and presents panels from its hand. |
@@ -39,11 +39,14 @@ circle in the air).
 ```
 open stocks · show my reels · rotate left · what's my schedule
 how is Nvidia today · summarise today's AI news · explain MCP
+take me to the fog chamber · switch to the ocean platform
 transform into a human shape · return to spatial mode
 lock · drift · open Spotify · search WebGPU
 ```
 
-Keyboard: `←` `→` rotate · `h` HUD · `m` ambient motion · `⌘K` palette.
+Pointer: hover a card to raise it, drag it off its slot and let go to send it
+home, click to open it. Keyboard: `←` `→` rotate · `↑` `↓` page the news deck ·
+`h` HUD · `m` ambient motion · `⌘K` palette.
 
 ---
 
@@ -87,6 +90,32 @@ choreography and the transformation each have exactly one number advancing;
 cards, camera, post chain and figure are pure functions of it and write nothing
 back. The return is the transformation clock run backward at 1.7×, not a second
 choreography to keep in sync.
+
+**One picker for both inputs.** Hand tracking and the pointer both resolve to
+a direction from the eye, so they go down one code path that raycasts the ring
+and publishes a single world-space cursor. Two pickers would mean two notions of
+what is hovered, and they would disagree the first time a hand appeared while
+the mouse was still over a card. A dragged card chases that cursor on an
+under-damped spring, so it trails the hand, overshoots when the hand stops, and
+settles elastically — and on release the target simply becomes its orbit slot
+again and the same spring carries it home. No physics simulation is involved:
+a thrown card has to be found again, and "where did it go" is a chore, not an
+interaction.
+
+**Halation is its own pass, and it has to be.** It reads neighbouring texels,
+which makes it a convolution, and `postprocessing` needs
+`EffectAttribute.CONVOLUTION` to give such an effect a pass of its own. Merged
+into the colour grade without it, it read and wrote the same buffer in one pass
+— undefined behaviour, and the driver's answer was a directional feedback that
+ATE thin bright features. A focused card's headline figure and sparkline were
+progressively erased while the duller body text survived. Every store reported a
+perfectly open, perfectly painted card. Only the frame buffer knew, which is why
+`scripts/png.mjs` exists and the visual suite now counts pixels.
+
+**The depth of field follows the subject.** A fixed focus distance is only
+correct while nothing moves, and opening a module moves both the card and the
+camera. Pinned to the resting ring radius, a focused card ended up inside the
+near field.
 
 **Spring physics everywhere, named by intent.** `MOTION.ARRIVING`,
 `LEAVING`, `ACKNOWLEDGING`, `REPORTING`, `DRIFTING` — and one `BEAT` constant
@@ -174,16 +203,23 @@ npm run build && npm start
 npm run verify:visual   # 16 checks against the running app, with screenshots
 ```
 
-`verify` covers the gold/warning isolation across the whole centredness range,
-the exact-zero drift arithmetic, transformation envelope bounds, command
-matching, the ⌘K ranking ladder, Instagram back-accumulation, and that injected
-command strings resolve to nothing.
+The logic suite is 20 checks; the visual suite is 25.
 
-`verify:visual` drives the real UI — the ⌘K palette, the on-screen controls — and
-checks that the ring renders, that drift is exactly zero in the running app, that
-every transformation phase is reached, that the hand presents a panel and the
-panel stops moving once it has settled, and that the return completes. It writes
-a screenshot per phase.
+`verify` covers the gold/warning isolation across the whole centredness range,
+the exact-zero drift arithmetic, transformation envelope bounds, command and
+environment matching, the ⌘K ranking ladder, weather-condition mapping,
+Instagram back-accumulation, and that injected command strings resolve to
+nothing.
+
+`verify:visual` drives the real UI — the ⌘K palette, the pointer, the on-screen
+controls — and checks that the ring renders, that drift is exactly zero in the
+running app, that a card hovers and drags and actually leaves its slot, that a
+click opens its module and raises the 3D stage, that environments switch by
+name, that every transformation phase is reached, that the hand presents a panel
+and the panel stops moving once it has settled, and that the return completes.
+It also decodes the frame buffer and counts bright saturated pixels on a focused
+card, because the halation bug above was invisible to every state-based check.
+It writes a screenshot per phase.
 
 ---
 
@@ -194,7 +230,9 @@ src/
   core/         constants (motion vocabulary, palette, worlds, modules), math
   stores/       zustand: system · carousel · gesture · ai · transform · data
   gesture/      MediaPipe tracker, pose and trajectory recognisers, engine
-  scene/        rig · carousel · card · atmosphere · presentation clock
+  scene/        rig · carousel · card · picker · trails · presentation clock
+    env/        weather conditions and precipitation
+    focus/      what a module becomes once open: chart · news deck · worlds
     materials/  card frame shader
     post/       bloom · DOF · the colour grade
     human/      anatomy data → SDF → GPU bake → Poisson → beads → hand rig
@@ -211,6 +249,27 @@ entry in `core/constants/modules.ts`.
 
 ---
 
+## Deviations from the brief
+
+Two of these are deliberate; please push back if you disagree.
+
+- **Rapier is not used, and no card is ever handed to a physics engine.** Phase 1
+  lists it, and Phase 6 then says released cards return directly to their orbit
+  slot and instructs that all thrown/recalling physics code be removed. Phase 6
+  supersedes, so the dependency would have been dead weight.
+- **React Spring and Valtio are not used, and are not dependencies.** Framer
+  Motion covers the DOM and the analytic springs in `core/math/spring.ts` cover
+  the scene — frame-rate independent, allocation-free, and usable inside the
+  render loop rather than through React state. Carrying a second animation
+  library for the same job is how a codebase ends up with two notions of how
+  fast something should feel. Valtio was optional in the brief. Say the word and
+  React Spring goes back in.
+- GSAP, Lenis and drei **are** used, each where it is the right tool: GSAP drives
+  the boot timeline (one seekable, killable object instead of a chain of
+  `setTimeout`s), Lenis smooths the two surfaces that scroll, and drei's `<Line>`
+  draws the gesture trails, because a raw WebGL line is one pixel wide on every
+  GPU at every distance.
+
 ## Known limits
 
 - **Voice quality** is the browser's own `speechSynthesis`. It plays outside the
@@ -220,7 +279,9 @@ entry in `core/constants/modules.ts`.
   into the same pipeline.
 - **Calendar, sports, projects and music** ship as sample adapters with the same
   shape as the live ones; they need an account to connect to, not new code.
-  Music transport works for real through the desktop bridge.
+  Music transport works for real through the desktop bridge. The project worlds
+  render whatever descriptions, media counts, prompt history and repository
+  links the adapter returns.
 - **Hand tracking** needs a camera grant and downloads the MediaPipe model on
   first use; the pointer is a full fallback and ⌘K needs neither.
 - **The figure breathes.** "Holds still" means no drift, no sway and no float —

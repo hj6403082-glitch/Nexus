@@ -13,7 +13,7 @@ import { useModuleData } from '@/stores/useModuleData';
 import { useSystemStore } from '@/stores/useSystemStore';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { MODULES, MODULE_BY_ID, type ModuleId } from '@/core/constants/modules';
-import { DEFAULT_WORLD } from '@/core/constants/worlds';
+import { DEFAULT_WORLD, WORLDS } from '@/core/constants/worlds';
 import { callBridge } from '@/ai/bridgeClient';
 
 /**
@@ -222,6 +222,12 @@ export function useNexus() {
           });
           return;
 
+        case 'environment':
+          system.setWorld(command.world);
+          system.pushLog(`world · ${WORLDS[command.world].label.toLowerCase()}`, 'ok');
+          audio.play('open', 0.5);
+          return;
+
         case 'ask':
           void ask(command.text);
           return;
@@ -309,10 +315,20 @@ export function useNexus() {
             .getState()
             .pushLog(carousel.frozen ? 'motion frozen' : 'motion resumed', 'ok');
           break;
+        /**
+         * Two hands reshape the RING, they do not throw things in it. Zoom
+         * pulls the whole orbit toward or away from you; group and split
+         * tighten or fan the angular spacing so a cluster can be read at once.
+         */
+        case 'two-hand-zoom':
+          if (event.value) carousel.zoom(event.value > 1 ? 0.97 : 1.03);
+          break;
         case 'two-hand-split':
-          useSystemStore.getState().pushLog('cards split', 'ok');
+          carousel.setSpread(useCarouselStore.getState().spread * 1.18);
+          useSystemStore.getState().pushLog('cards fanned', 'ok');
           break;
         case 'two-hand-group':
+          carousel.setSpread(useCarouselStore.getState().spread * 0.82);
           useSystemStore.getState().pushLog('cards grouped', 'ok');
           break;
       }

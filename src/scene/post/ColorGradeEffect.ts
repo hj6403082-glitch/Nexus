@@ -19,12 +19,12 @@ import { GREY_PIVOT, type WorldGrade } from '@/core/constants/worlds';
  *      drags the mid-tones the split just protected; pivoting at 18% grey
  *      deepens the shadows and extends the highlights around them.
  *
- *   3. HALATION. Bright areas bleed into their neighbours with a warm bias,
- *      the way light scatters in a real lens stack. This is what stops the
- *      bloom reading as a post-process and starts it reading as glass.
- *
- *   4. Saturation and warmth last, so the world's identity is applied to a
+ *   3. Saturation and warmth last, so the world's identity is applied to a
  *      picture that is already correctly shaped.
+ *
+ * HALATION IS NOT HERE. It reads neighbouring texels, which makes it a
+ * convolution, and a convolution cannot share a pass with anything else — see
+ * HalationEffect for what happened when it did.
  */
 const fragment = /* glsl */ `
 uniform vec3  uShadowTint;
@@ -32,10 +32,8 @@ uniform vec3  uHighlightTint;
 uniform float uSplit;
 uniform float uContrast;
 uniform float uWarmth;
-uniform float uHalation;
 uniform float uSaturation;
 uniform float uVignette;
-uniform vec2  uTexel;
 
 const float PIVOT = ${GREY_PIVOT.toFixed(3)};
 
@@ -43,21 +41,6 @@ float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 c = inputColor.rgb;
-
-  // ---- 3. halation (sampled first; it needs the ungraded neighbourhood) ----
-  if (uHalation > 0.001) {
-    vec3 bleed = vec3(0.0);
-    // A cheap 8-tap ring. A full gaussian here is invisible next to the bloom
-    // pass that already ran; what matters is the WARM BIAS, not the kernel.
-    for (int i = 0; i < 8; i++) {
-      float a = float(i) * 0.7853981;
-      vec2 o = vec2(cos(a), sin(a)) * uTexel * 3.0;
-      bleed += texture2D(inputBuffer, uv + o).rgb;
-    }
-    bleed /= 8.0;
-    float bright = smoothstep(0.55, 1.0, luma(bleed));
-    c += bleed * bright * uHalation * vec3(1.0, 0.72, 0.55);
-  }
 
   // ---- 1. split-tone the ends of the ramp, leave the mid-tones -----------
   float l = luma(c);
@@ -72,7 +55,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // ---- 2. filmic contrast, pivoting at 18% grey ---------------------------
   c = max(vec3(0.0), (c - PIVOT) * uContrast + PIVOT);
 
-  // ---- 4. warmth and saturation ------------------------------------------
+  // ---- 3. warmth and saturation ------------------------------------------
   c.r *= 1.0 + uWarmth * 0.22;
   c.b *= 1.0 - uWarmth * 0.22;
 
@@ -98,10 +81,8 @@ export class ColorGradeEffect extends Effect {
         ['uSplit', new THREE.Uniform(grade.split)],
         ['uContrast', new THREE.Uniform(grade.contrast)],
         ['uWarmth', new THREE.Uniform(grade.warmth)],
-        ['uHalation', new THREE.Uniform(grade.halation)],
         ['uSaturation', new THREE.Uniform(grade.saturation)],
         ['uVignette', new THREE.Uniform(0.55)],
-        ['uTexel', new THREE.Uniform(new THREE.Vector2(1 / 1920, 1 / 1080))],
       ]),
     });
   }
@@ -113,12 +94,7 @@ export class ColorGradeEffect extends Effect {
     u.get('uSplit')!.value = grade.split;
     u.get('uContrast')!.value = grade.contrast;
     u.get('uWarmth')!.value = grade.warmth;
-    u.get('uHalation')!.value = grade.halation;
     u.get('uSaturation')!.value = grade.saturation;
     u.get('uVignette')!.value = vignette;
-  }
-
-  override setSize(width: number, height: number): void {
-    (this.uniforms.get('uTexel')!.value as THREE.Vector2).set(1 / width, 1 / height);
   }
 }
