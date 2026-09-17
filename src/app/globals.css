@@ -1,0 +1,58 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-nexus-void: #04060b;
+  --color-nexus-fog: #0a1018;
+  --color-nexus-glass: #0e1622;
+  --color-nexus-ink: #e8eef8;
+  --color-nexus-dim: #7c8ba3;
+  --color-nexus-accent: #7cb2ff;
+  --color-nexus-warn: #f59440;
+
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-nexus-void);
+  color: var(--color-nexus-ink);
+  overscroll-behavior: none;
+}
+
+body {
+  margin: 0;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The scene owns the viewport; nothing scrolls behind it. */
+body:has(canvas) {
+  overflow: hidden;
+}
+
+::selection {
+  background: rgb(124 178 255 / 0.28);
+}
+
+/*
+ * Reduced motion is honoured for the DOM layer here; the SCENE honours it by
+ * leaving ambient drift off, which it already is by default. The two are
+ * separate because a user who wants no parallax may still want the carousel to
+ * respond to their own input — stopping that would be removing the interface,
+ * not calming it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
