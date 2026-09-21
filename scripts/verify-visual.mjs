@@ -86,15 +86,27 @@ check(
 // --- picking, on the pointer fallback --------------------------------------
 // The mouse exists only as a fallback, but a fallback that does not work is
 // not one: it has to hover, select and drag exactly as a hand does.
-await page.mouse.move(720, 450);
-await page.waitForTimeout(600);
-const hovered = await page.evaluate(() => window.__nexus().hovered);
+/**
+ * Poll rather than wait a fixed 600 ms.
+ *
+ * Picking happens once per FRAME, and on software rendering a frame can take
+ * most of a second — so a fixed wait was sometimes shorter than a single
+ * frame and the check failed on a scene that was working perfectly. A flaky
+ * check is worse than no check: it teaches you to ignore red.
+ */
+const hovered = await until(async () => {
+  await page.mouse.move(720, 450);
+  return (await page.evaluate(() => window.__nexus().hovered)) || null;
+}, 20_000, 500);
 check('the centred card hovers under the pointer', Boolean(hovered), String(hovered));
 
 await page.mouse.move(720, 450);
 await page.mouse.down();
-await page.waitForTimeout(300);
-const dragging = await page.evaluate(() => window.__nexus().dragging);
+const dragging = await until(
+  async () => (await page.evaluate(() => window.__nexus().dragging)) || null,
+  10_000,
+  400,
+);
 check('pressing a card starts a drag', Boolean(dragging), String(dragging));
 // Drag it well off its slot, then let go. The store knowing a drag is in
 // progress proves nothing about whether the card moved, so this reads the
@@ -116,8 +128,10 @@ check(
 );
 
 // A click (press and release without travel) opens the module.
-await page.mouse.move(720, 450);
-await page.waitForTimeout(400);
+await until(async () => {
+  await page.mouse.move(720, 450);
+  return (await page.evaluate(() => window.__nexus().hovered)) || null;
+}, 20_000, 500);
 await page.mouse.click(720, 450);
 const opened = await until(
   async () => (await page.evaluate(() => window.__nexus().open)) || null,

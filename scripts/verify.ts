@@ -21,6 +21,8 @@ import { matchWorld, NAMED_WORLDS } from '../src/core/constants/worlds.ts';
 import { readCondition } from '../src/scene/env/condition.ts';
 import { TwoHandRecognizer } from '../src/gesture/recognizers.ts';
 import { telemetryRows } from '../src/stores/clientTelemetry.ts';
+import { parseOllamaLine } from '../src/server/ai/ollama.ts';
+import { describeKeyProblem, parseGeminiLine } from '../src/server/ai/gemini.ts';
 import { VERBS, isVerb } from '../src/server/bridge/verbs.ts';
 
 let failures = 0;
@@ -232,6 +234,100 @@ check('follower deltas back-accumulate into the true curve', () => {
   const series = backAccumulate(1000, deltas);
   assert.deepEqual(series, [940, 950, 970, 1000]);
   assert.equal(series[series.length - 1], 1000, 'the curve must end at the known total');
+});
+
+console.log('\nAI PROVIDERS');
+
+check('ollama tool arguments are accepted parsed OR as a JSON string', () => {
+  // Ollama hands back an already-parsed object. OpenAI-compatible proxies in
+  // front of it hand back a JSON string. Trusting one breaks the other.
+  const parsed = parseOllamaLine(
+    JSON.stringify({
+      message: {
+        content: '',
+        tool_calls: [{ function: { name: 'open_module', arguments: { module: 'stocks' } } }],
+      },
+    }),
+  );
+  assert.deepEqual(parsed, [{ call: { name: 'open_module', args: { module: 'stocks' } } }]);
+
+  const asString = parseOllamaLine(
+    JSON.stringify({
+      message: {
+        content: '',
+        tool_calls: [
+          { function: { name: 'open_module', arguments: '{"module":"weather"}' } },
+        ],
+      },
+    }),
+  );
+  assert.deepEqual(asString, [{ call: { name: 'open_module', args: { module: 'weather' } } }]);
+});
+
+check('a partial ollama line yields nothing rather than throwing', () => {
+  // Chunk boundaries split JSON mid-object constantly; the carry picks it up.
+  assert.deepEqual(parseOllamaLine('{"message":{"cont'), []);
+  assert.deepEqual(parseOllamaLine(''), []);
+  assert.deepEqual(parseOllamaLine('   '), []);
+});
+
+check('ollama content and errors map to the shared wire format', () => {
+  assert.deepEqual(parseOllamaLine(JSON.stringify({ message: { content: 'hello' } })), [
+    { t: 'hello' },
+  ]);
+  assert.deepEqual(parseOllamaLine(JSON.stringify({ error: 'model not found' })), [
+    { error: 'model not found' },
+  ]);
+  // A done frame with no content must not emit an empty token.
+  assert.deepEqual(parseOllamaLine(JSON.stringify({ message: { content: '' }, done: true })), []);
+});
+
+check('gemini SSE maps to the same wire format', () => {
+  const line =
+    'data: ' +
+    JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [{ text: 'Nvidia is up.' }, { functionCall: { name: 'open_module', args: { module: 'stocks' } } }],
+          },
+        },
+      ],
+    });
+  assert.deepEqual(parseGeminiLine(line), [
+    { t: 'Nvidia is up.' },
+    { call: { name: 'open_module', args: { module: 'stocks' } } },
+  ]);
+  // Non-data lines and the terminator are ignored, not treated as content.
+  assert.deepEqual(parseGeminiLine(''), []);
+  assert.deepEqual(parseGeminiLine('data: [DONE]'), []);
+  assert.deepEqual(parseGeminiLine('event: ping'), []);
+});
+
+check('both providers produce the SAME shape for the same answer', () => {
+  // This is the point of normalising at the server edge: the client must not
+  // be able to tell which brain replied.
+  const fromOllama = parseOllamaLine(JSON.stringify({ message: { content: 'Understood.' } }));
+  const fromGemini = parseGeminiLine(
+    'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Understood.' }] } }] }),
+  );
+  assert.deepEqual(fromOllama, fromGemini);
+});
+
+check('a credential that is not an AI Studio key is named, not passed through', () => {
+  // The exact token shape that wasted a round trip: valid Google credential,
+  // wrong mechanism for this endpoint.
+  assert.match(describeKeyProblem('AQ.Ab8RN6SOMETHING')!, /OAuth access token/);
+  assert.match(describeKeyProblem('ya29.a0Af')!, /OAuth access token/);
+  assert.match(describeKeyProblem('{"type":"service_account"}')!, /Vertex AI/);
+  assert.match(describeKeyProblem('sk-proj-abc')!, /OpenAI/);
+  assert.match(describeKeyProblem('nonsense')!, /AIzaSy/);
+  // Every message offers the no-key way out.
+  for (const bad of ['AQ.x', 'ya29.x', 'sk-x', 'nonsense']) {
+    assert.match(describeKeyProblem(bad)!, /ollama/i, `no local fallback offered for ${bad}`);
+  }
+  // A well-formed key passes.
+  assert.equal(describeKeyProblem('AIzaSyAbCdEf0123456789AbCdEf0123456789'), null);
 });
 
 console.log('\nTWO-HAND GESTURES');

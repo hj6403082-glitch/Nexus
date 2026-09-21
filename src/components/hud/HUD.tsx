@@ -124,6 +124,7 @@ function BottomLeft() {
 function BottomRight() {
   const { gesture, confidence, gestureAt } = useGestureStore();
   const status = useAIStore((s) => s.status);
+  const provider = useAIStore((s) => s.provider);
   const phase = useTransformStore((s) => s.phase);
   const [fresh, setFresh] = useState(false);
 
@@ -148,6 +149,14 @@ function BottomRight() {
         align="right"
       />
       <Row label="ai" value={status} tone={status === 'offline' ? 'warn' : 'ok'} align="right" />
+      {provider && (
+        <Row
+          label="brain"
+          value={provider.name === 'none' ? 'offline' : `${provider.name} ${provider.model}`.trim()}
+          tone={provider.name === 'none' ? 'warn' : 'dim'}
+          align="right"
+        />
+      )}
       {phase !== 'NORMAL' && (
         <Row label="form" value={phase.toLowerCase().replace(/_/g, ' ')} tone="ok" align="right" />
       )}

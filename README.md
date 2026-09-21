@@ -12,7 +12,16 @@ npm run dev                    # http://localhost:3000
 ```
 
 Nothing is required to run it. Modules with no API key fall back to deterministic
-sample data and say so on the card face. The AI is offline without a Gemini key.
+sample data and say so on the card face.
+
+**For the AI, the easiest path needs no key at all:**
+
+```bash
+ollama pull llama3.2 && ollama serve
+```
+
+NEXUS auto-detects it and prefers local. `curl localhost:3000/api/ai` tells you
+which brain is running and why; the HUD shows it too, bottom right.
 The desktop bridge is off unless you turn it on.
 
 ---
@@ -24,7 +33,7 @@ Built in seven passes, each extending the last rather than replacing it.
 | | |
 |---|---|
 | **1 — Foundation** | The room, the ring, ten glass cards with live data, MediaPipe hand tracking, hover/select/drag on hand or pointer, spring physics, adaptive quality, synthesised audio, a four-corner HUD. |
-| **2 — AI brain** | Streaming Gemini through a server proxy, `SpeechRecognition` with barge-in interruption, speech that starts before the response finishes, holographic text that assembles from scattered words. |
+| **2 — AI brain** | Streaming from a local Ollama model or from Gemini behind one server-side endpoint, `SpeechRecognition` with barge-in interruption, speech that starts before the response finishes, holographic text that assembles from scattered words. |
 | **3 — Knowledge** | Real adapters for Instagram, stocks, weather and news; sample adapters for the rest. The System module reads the actual machine — CPU, GPU, battery, network, memory, storage. Opening a module raises a 3D stage: a chart that stands up off the floor, a deck of articles you swipe through, a constellation of project worlds. Every figure carries provenance and age. |
 | **4 — Worlds** | Six named environments switchable by voice or ⌘K, a weather world with real precipitation, a Stocks world whose floor becomes a live market grid, cinematic module transitions, light trails on every gesture, cards that ripple when struck, a fill light that responds to speech and gesture, two-hand zoom / group / split / multi-select. |
 | **5 — Desktop bridge** | A hardened local API that launches apps, opens windows on a chosen display, and drives media — macOS only, off by default. A ⌘K palette over apps, sites and commands. |
@@ -136,6 +145,35 @@ in the scene graph.
 
 ---
 
+## Two brains, one endpoint
+
+`POST /api/ai` streams newline-delimited JSON — `{t}` for a token, `{call}` for
+a tool call, `{error}` for a failure — and the client never learns which
+provider produced it. Adding a third backend is a file in `src/server/ai`, not
+a change to the speech pipeline, the holographic text or the tool dispatch.
+There is a test asserting both providers emit *byte-identical* events for the
+same answer, because that equivalence is the whole point and it is the kind of
+thing that rots silently.
+
+**Local wins by default.** With `NEXUS_AI_PROVIDER` unset, NEXUS probes Ollama
+with a short timeout and uses it if it answers. A local model costs nothing per
+token, needs no credential, works on a plane, and keeps the conversation on the
+machine — for an assistant you talk to continuously that matters more than the
+last few points of benchmark. If the configured model is not pulled but others
+are, it uses one of those rather than failing.
+
+Two provider quirks worth knowing, both covered by tests:
+
+- **Ollama hands back tool arguments already parsed**, as an object. OpenAI-compatible
+  APIs hand back a JSON string. Trusting either one alone breaks the other, so
+  the parser accepts both.
+- **Gemini's REST endpoint accepts exactly one credential shape** — an AI Studio
+  key, `AIzaSy…`. An OAuth token (`ya29.`, `AQ.`) or a service account JSON is a
+  perfectly valid Google credential for a *different* mechanism, and Google
+  answers with a bare `400` that says none of this. NEXUS names the mismatch
+  before spending the round trip, and every such message offers the no-key way
+  out.
+
 ## The desktop bridge
 
 `POST /api/bridge` shells out from the Next.js server. **This is a remote code
@@ -211,12 +249,12 @@ back-accumulating from the current total.
 
 ```bash
 npm run lint:shaders    # a backtick in a shader comment ends the literal
-npm run verify          # shader lint + 24 logic checks, no browser needed
+npm run verify          # shader lint + 30 logic checks, no browser needed
 npm run build && npm start
 npm run verify:visual   # 28 checks against the running app, with screenshots
 ```
 
-The logic suite is 24 checks; the visual suite is 28.
+The logic suite is 30 checks; the visual suite is 28.
 
 `verify` covers the gold/warning isolation across the whole centredness range,
 the exact-zero drift arithmetic, transformation envelope bounds, command and

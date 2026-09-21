@@ -58,7 +58,7 @@ export function useNexus() {
 
     let response: Response;
     try {
-      response = await fetch('/api/gemini', {
+      response = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -435,6 +435,30 @@ export function useNexus() {
 
   // ---- boot ---------------------------------------------------------------
   useEffect(() => {
+    // Ask which brain is available before the first question rather than
+    // after it, so the HUD can say "offline" up front instead of the user
+    // discovering it by being ignored.
+    void fetch('/api/ai')
+      .then((r) => r.json())
+      .then((info: { provider: string; model: string; reason: string }) => {
+        useAIStore.getState().setProvider({
+          name: info.provider,
+          model: info.model,
+          reason: info.reason,
+        });
+        if (info.provider === 'none') {
+          useAIStore.getState().setStatus('offline');
+          useSystemStore.getState().pushLog(info.reason, 'warn');
+        } else {
+          useSystemStore
+            .getState()
+            .pushLog(`brain · ${info.provider}${info.model ? ` · ${info.model}` : ''}`, 'ok');
+        }
+      })
+      .catch(() => {
+        useAIStore.getState().setStatus('offline');
+      });
+
     void useModuleData.getState().loadAll();
     const interval = setInterval(() => {
       void useModuleData.getState().loadAll();

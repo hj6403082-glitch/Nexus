@@ -55,6 +55,15 @@ interface AIState {
 
   error: string | null;
   setError: (e: string | null) => void;
+
+  /**
+   * Which brain is answering — 'ollama', 'gemini' or 'none' — and on which
+   * model. Shown in the HUD because "why did that answer sound different" is
+   * otherwise unanswerable, and because a local model going missing should be
+   * visible without opening a terminal.
+   */
+  provider: { name: string; model: string; reason: string } | null;
+  setProvider: (p: { name: string; model: string; reason: string } | null) => void;
 }
 
 let n = 0;
@@ -103,4 +112,7 @@ export const useAIStore = create<AIState>()((set, get) => ({
 
   error: null,
   setError: (error) => set({ error }),
+
+  provider: null,
+  setProvider: (provider) => set({ provider }),
 }));
