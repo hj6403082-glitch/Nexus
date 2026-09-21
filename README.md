@@ -165,7 +165,22 @@ machine — for an assistant you talk to continuously that matters more than the
 last few points of benchmark. If the configured model is not pulled but others
 are, it uses one of those rather than failing.
 
-Two provider quirks worth knowing, both covered by tests:
+Three provider facts worth knowing, all three learned or confirmed by running
+the **real Ollama server** (built from source — its release binaries and model
+registry are both unreachable from the build environment, so the token stream
+and tool calls are still validated against a stand-in speaking its documented
+protocol, but everything below came from the genuine article):
+
+- **Running is not the same as ready.** A fresh Ollama with nothing pulled
+  answers `/api/tags` with `{"models":[]}` — a perfectly successful response
+  carrying an empty list. Treating "reachable" as "usable" committed NEXUS to a
+  backend that would 404 every question with `model 'llama3.2' not found`, and
+  it did so even when a working Gemini key was sitting right there. An empty
+  Ollama now falls through to Gemini, and only says what to pull when there is
+  nothing to fall through to. A stand-in never produced this case, because a
+  stand-in always has models.
+
+Two more, both covered by tests:
 
 - **Ollama hands back tool arguments already parsed**, as an object. OpenAI-compatible
   APIs hand back a JSON string. Trusting either one alone breaks the other, so
@@ -273,12 +288,12 @@ back-accumulating from the current total.
 
 ```bash
 npm run lint:shaders    # a backtick in a shader comment ends the literal
-npm run verify          # shader lint + 31 logic checks, no browser needed
+npm run verify          # shader lint + 34 logic checks, no browser needed
 npm run build && npm start
 npm run verify:visual   # 33 checks against the running app, with screenshots
 ```
 
-The logic suite is 31 checks; the visual suite is 33.
+The logic suite is 34 checks; the visual suite is 33.
 
 `verify` covers the gold/warning isolation across the whole centredness range,
 the exact-zero drift arithmetic, transformation envelope bounds, command and

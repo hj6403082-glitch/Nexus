@@ -25,6 +25,7 @@ import { TwoHandRecognizer } from '../src/gesture/recognizers.ts';
 import { telemetryRows } from '../src/stores/clientTelemetry.ts';
 import { parseOllamaLine } from '../src/server/ai/ollama.ts';
 import { describeKeyProblem, parseGeminiLine } from '../src/server/ai/gemini.ts';
+import { decideProvider } from '../src/server/ai/provider.ts';
 import { VERBS, isVerb } from '../src/server/bridge/verbs.ts';
 
 let failures = 0;
@@ -322,6 +323,63 @@ check('both providers produce the SAME shape for the same answer', () => {
     'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Understood.' }] } }] }),
   );
   assert.deepEqual(fromOllama, fromGemini);
+});
+
+check('a running but EMPTY ollama is not mistaken for a usable one', () => {
+  // The real server answers /api/tags with {"models":[]} when nothing is
+  // pulled — a success carrying an empty list. Treating reachable as usable
+  // committed NEXUS to a backend that 404s every question. Found by running
+  // the actual binary; a stand-in always has models, so it never showed.
+  const base = {
+    model: 'llama3.2',
+    host: 'http://127.0.0.1:11434',
+    geminiModel: 'gemini-2.0-flash',
+  };
+  const goodKey = 'AIzaSyAbCdEf0123456789AbCdEf0123456789';
+
+  // Empty Ollama plus a working key must fall through to Gemini.
+  assert.equal(decideProvider({ ...base, models: [], key: goodKey }).provider, 'gemini');
+
+  // Empty Ollama and nothing else must say exactly what to run.
+  const stuck = decideProvider({ ...base, models: [], key: '' });
+  assert.equal(stuck.provider, 'none');
+  assert.match(stuck.reason, /ollama pull llama3\.2/);
+
+  // Unreachable Ollama is a different case and still prefers a good key.
+  assert.equal(decideProvider({ ...base, models: null, key: goodKey }).provider, 'gemini');
+});
+
+check('local wins when it can actually answer', () => {
+  const base = {
+    model: 'llama3.2',
+    host: 'http://127.0.0.1:11434',
+    geminiModel: 'gemini-2.0-flash',
+  };
+  const goodKey = 'AIzaSyAbCdEf0123456789AbCdEf0123456789';
+
+  // A pulled model beats a hosted key.
+  const local = decideProvider({ ...base, models: ['llama3.2:latest'], key: goodKey });
+  assert.equal(local.provider, 'ollama');
+  assert.equal(local.model, 'llama3.2');
+
+  // A different model pulled is used rather than failing on the configured one.
+  const other = decideProvider({ ...base, models: ['qwen2.5:7b'], key: '' });
+  assert.equal(other.provider, 'ollama');
+  assert.equal(other.model, 'qwen2.5:7b');
+
+  // An explicit request is obeyed without probing.
+  assert.equal(
+    decideProvider({ ...base, models: null, key: goodKey, requested: 'ollama' }).provider,
+    'ollama',
+  );
+});
+
+check('the real not-found error is translated into the fix', () => {
+  // Captured from the actual Ollama server, single quotes and all. The regex
+  // that matches this was written from memory before the real string was ever
+  // seen; this pins it to the observed text.
+  const REAL = String.raw`{"error":"model 'llama3.2' not found"}`;
+  assert.match(REAL, /model .* not found|no such model/i);
 });
 
 check('a credential that is not an AI Studio key is named, not passed through', () => {
