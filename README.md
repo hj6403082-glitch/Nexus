@@ -54,8 +54,11 @@ lock · drift · open Spotify · search WebGPU
 ```
 
 Pointer: hover a card to raise it, drag it off its slot and let go to send it
-home, click to open it. Keyboard: `←` `→` rotate · `↑` `↓` page the news deck ·
-`h` HUD · `m` ambient motion · `⌘K` palette.
+home, click to open it.
+
+Keyboard, with no pointer at all: `←` `→` rotate · `Enter` open the centred
+module · `Esc` close · `↑` `↓` page the news deck · `h` HUD · `m` ambient
+motion · `⌘K` everything.
 
 ---
 
@@ -174,6 +177,27 @@ Two provider quirks worth knowing, both covered by tests:
   before spending the round trip, and every such message offers the no-key way
   out.
 
+## When it breaks
+
+NEXUS is one large WebGL surface, and WebGL has failure modes ordinary React
+does not: a shader that will not compile on some driver, a buffer that will not
+allocate, a context the browser takes back. Any of those throws inside the
+render loop and takes the whole page white — stranding you with no route to
+data that is still perfectly available over HTTP.
+
+So the scene is wrapped. It falls back to flat mode with the same live modules
+and ⌘K still working, and it names the real cause. A lost context in particular
+makes every WebGL call start returning null, so React usually throws a
+null-property error in the same frame the loss fires; reporting *that* would
+show you `Cannot read properties of null (reading 'alpha')`, which is true,
+useless and alarming. The boundary checks whether the context is the known
+cause and says so instead. There is a regression check that deliberately
+destroys the context and asserts all three things.
+
+The camera and microphone are released when the hook unmounts, not only when
+you press the button again — a privacy problem before it is a resource one, and
+one you would notice in your menu bar long before a profiler.
+
 ## The desktop bridge
 
 `POST /api/bridge` shells out from the Next.js server. **This is a remote code
@@ -249,12 +273,12 @@ back-accumulating from the current total.
 
 ```bash
 npm run lint:shaders    # a backtick in a shader comment ends the literal
-npm run verify          # shader lint + 30 logic checks, no browser needed
+npm run verify          # shader lint + 31 logic checks, no browser needed
 npm run build && npm start
-npm run verify:visual   # 28 checks against the running app, with screenshots
+npm run verify:visual   # 33 checks against the running app, with screenshots
 ```
 
-The logic suite is 30 checks; the visual suite is 28.
+The logic suite is 31 checks; the visual suite is 33.
 
 `verify` covers the gold/warning isolation across the whole centredness range,
 the exact-zero drift arithmetic, transformation envelope bounds, command and

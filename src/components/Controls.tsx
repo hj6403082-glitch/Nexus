@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useGestureStore } from '@/stores/useGestureStore';
 import { useSystemStore } from '@/stores/useSystemStore';
+import { useCarouselStore } from '@/stores/useCarouselStore';
 import { useAIStore } from '@/stores/useAIStore';
 import { audio } from '@/audio/AudioEngine';
 import type { useNexus } from '@/hooks/useNexus';
@@ -19,12 +20,28 @@ export function Controls({ nexus }: { nexus: ReturnType<typeof useNexus> }) {
   const [muted, setMuted] = useState(false);
 
   useEffect(() => {
+    /**
+     * The ring, operable without a pointer.
+     *
+     * Arrows rotated it but nothing OPENED it, so a keyboard user could tour
+     * the modules and never reach one. Enter and Space open the centred card;
+     * Escape closes it and clears any multi-selection.
+     */
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === 'h') useSystemStore.getState().toggleHud();
       if (e.key === 'm') useSystemStore.getState().toggleDrift();
       if (e.key === 'ArrowLeft') nexus.submit('rotate left');
       if (e.key === 'ArrowRight') nexus.submit('rotate right');
+      if (e.key === 'Enter' || e.key === ' ') {
+        // Space scrolls the page by default, and the page is a 3D scene.
+        e.preventDefault();
+        nexus.openCentred();
+      }
+      if (e.key === 'Escape') {
+        useCarouselStore.getState().close();
+        useCarouselStore.getState().clearSelection();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

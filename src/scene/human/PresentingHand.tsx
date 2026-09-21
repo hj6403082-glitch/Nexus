@@ -38,6 +38,9 @@ export function PresentingHand() {
   const materialise = useRef(0);
 
   const material = useMemo(() => makeHandMaterial(), []);
+  // A ShaderMaterial holds a compiled GPU program; React dropping the
+  // component does not free it.
+  useEffect(() => () => material.dispose(), [material]);
 
   useEffect(() => {
     let cancelled = false;

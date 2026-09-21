@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { TIER_BUDGET, useSystemStore } from '@/stores/useSystemStore';
@@ -53,6 +53,14 @@ function Dust() {
     g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
     return g;
   }, [count]);
+
+  /**
+   * The adaptive quality monitor changes the tier during normal use, and each
+   * change rebuilds this geometry. Without disposing the previous one, a
+   * session that shifts tiers a few times leaks a buffer every time — the one
+   * leak here that actually fires in ordinary use rather than only on reload.
+   */
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   const uniforms = useMemo(
     () => ({

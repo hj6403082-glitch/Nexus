@@ -30,8 +30,9 @@ export function Fallback({ reason }: { reason: string }) {
       <header className="mx-auto mb-10 max-w-5xl">
         <h1 className="font-mono text-[13px] tracking-[0.4em]">NEXUS</h1>
         <p className="mt-2 max-w-prose text-[13px] text-nexus-dim">
-          Running in flat mode — {reason}. Every module below carries the same live data the
-          spatial interface does.
+          Running in flat mode — {reason}. Every module below carries the same live
+          data the spatial interface does, and ⌘K still works. Reloading will try
+          the spatial interface again.
         </p>
       </header>
 

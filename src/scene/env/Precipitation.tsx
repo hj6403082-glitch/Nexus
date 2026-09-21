@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { TIER_BUDGET, useSystemStore } from '@/stores/useSystemStore';
@@ -44,6 +44,9 @@ export function Precipitation() {
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 20);
     return g;
   }, [count]);
+
+  // Rebuilt on every tier change, like the dust. Dispose the old one.
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   const uniforms = useMemo(
     () => ({

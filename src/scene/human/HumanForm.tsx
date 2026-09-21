@@ -55,6 +55,9 @@ export function HumanForm() {
   const { gl, size } = useThree();
   const points = useRef<THREE.Points>(null);
   const material = useMemo(() => makeBeadMaterial(), []);
+  // A ShaderMaterial holds a compiled GPU program; React dropping the
+  // component does not free it.
+  useEffect(() => () => material.dispose(), [material]);
   const [bakeState, setBakeState] = useState<BakeState>('idle');
 
   /**
@@ -282,9 +285,9 @@ export function HumanForm() {
     // Ten matrices. That is the entire per-frame CPU cost of keeping every
     // particle pinned to its card pixel while the cards turn toward the core.
     const matrices = u.uCardMatrix.value as THREE.Matrix4[];
-    for (let i = 0; i < MAX_CARDS; i++) {
-      const module = MODULES[i];
-      const handle = module ? cardRegistry.get(module.id) : undefined;
+    const slots = Math.min(MAX_CARDS, MODULES.length);
+    for (let i = 0; i < slots; i++) {
+      const handle = cardRegistry.get(MODULES[i].id);
       if (handle?.matrix) matrices[i].copy(handle.matrix);
     }
 

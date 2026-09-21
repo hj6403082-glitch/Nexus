@@ -207,6 +207,34 @@ check('opening weather morphs the world to match it', Boolean(weather));
 await page.waitForTimeout(3500);
 await page.screenshot({ path: `${SHOTS}/01e-weather.png` });
 
+// --- the ring is operable without a pointer --------------------------------
+// Arrows used to rotate the ring while nothing opened it, so a keyboard user
+// could tour every module and reach none of them.
+await page.keyboard.press('Escape');
+await until(
+  async () => ((await page.evaluate(() => window.__nexus().open)) === null ? true : null),
+  10_000,
+  400,
+);
+await page.mouse.move(20, 880); // park the pointer off every card
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(1200);
+await page.keyboard.press('Enter');
+const byKeyboard = await until(
+  async () => (await page.evaluate(() => window.__nexus().open)) || null,
+  25_000,
+  700,
+);
+check('the ring opens a module from the keyboard alone', Boolean(byKeyboard), String(byKeyboard));
+
+await page.keyboard.press('Escape');
+const closedByKeyboard = await until(
+  async () => ((await page.evaluate(() => window.__nexus().open)) === null ? true : null),
+  15_000,
+  500,
+);
+check('escape closes it again', Boolean(closedByKeyboard));
+
 // --- the system module reports the machine ---------------------------------
 await page.keyboard.press('Meta+k');
 await page.waitForTimeout(700);
@@ -230,7 +258,27 @@ check(
 // Measured in pixels: the market grid is green-cyan and the room's lattice is
 // blue, so this counts pixels where green leads and compares the floor before
 // and after opening Stocks.
+/**
+ * Measured from a KNOWN world, not from whatever happened to be active.
+ *
+ * The baseline used to be sampled wherever the previous check left the scene,
+ * so inserting a step earlier in the suite moved the baseline and failed a
+ * feature that was working. A test whose result depends on its position in the
+ * file is a flake that has not happened yet.
+ */
 const floorClip = { x: 120, y: 600, width: 1200, height: 280 };
+await page.keyboard.press('Meta+k');
+await page.waitForTimeout(700);
+await page.click(PALETTE);
+await page.type(PALETTE, 'Minimal Studio', { delay: 40 });
+await page.keyboard.press('Enter');
+await until(
+  async () =>
+    (await page.evaluate(() => window.__nexus().world)) === 'minimal-studio' ? true : null,
+  20_000,
+  600,
+);
+await page.waitForTimeout(3000);
 const beforeFloor = meanGreenOverRed(readPng(await page.screenshot({ clip: floorClip })));
 
 await page.keyboard.press('Meta+k');
@@ -379,6 +427,46 @@ await page.waitForTimeout(3000);
 await page.screenshot({ path: `${SHOTS}/09-returned.png` });
 
 check('no uncaught errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+
+/**
+ * LAST, because it deliberately destroys the scene.
+ *
+ * A lost GPU context is ordinary on laptops — a driver reset, a switch between
+ * integrated and discrete graphics, too many live contexts in other tabs. It
+ * used to take the whole page white, stranding the user with no route to data
+ * that was still perfectly available over HTTP. Everything after this point
+ * throws WebGL errors on purpose, so the console check above has already run.
+ */
+await page.evaluate(() => {
+  const canvas = document.querySelector('canvas');
+  const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+  gl.getExtension('WEBGL_lose_context').loseContext();
+});
+
+const recovered = await until(
+  async () =>
+    (await page.evaluate(() => ({
+      flat: document.body.innerText.includes('Running in flat mode'),
+      reason: document.body.innerText.match(/flat mode — ([^.]*)/)?.[1] ?? '',
+      data: document.body.innerText.includes('Instagram'),
+    }))).flat
+      ? await page.evaluate(() => ({
+          reason: document.body.innerText.match(/flat mode — ([^.]*)/)?.[1] ?? '',
+          data: document.body.innerText.includes('Instagram'),
+        }))
+      : null,
+  20_000,
+  1000,
+);
+
+check('a lost GPU context falls back instead of whiting out', Boolean(recovered));
+check(
+  'the fallback names the real cause, not an internal error',
+  Boolean(recovered) && /graphics context/.test(recovered.reason),
+  recovered ? recovered.reason : 'never fell back',
+);
+check('the modules are still readable after the fallback', Boolean(recovered?.data));
+await page.screenshot({ path: `${SHOTS}/10-context-lost.png` });
 
 await browser.close();
 console.log(

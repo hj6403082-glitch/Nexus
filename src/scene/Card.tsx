@@ -98,6 +98,11 @@ export function Card({ module, index, count, radius }: CardProps) {
     return t;
   }, [painter]);
 
+  // A CanvasTexture holds a GPU upload that outlives the React tree unless it
+  // is disposed by hand. Ten cards at 512x704 is not enormous, but it leaks on
+  // every hot reload and on every remount, which is most of development.
+  useEffect(() => () => texture?.dispose(), [texture]);
+
   const record = useModuleData((s) => s.records[module.id]);
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { ACCENTS } from '@/core/constants/palette';
@@ -49,6 +49,14 @@ export function TargetingBracket() {
     g.setAttribute('position', new THREE.Float32BufferAttribute(shapes, 3));
     return g;
   }, []);
+
+  useEffect(
+    () => () => {
+      geometry.dispose();
+      material.dispose();
+    },
+    [geometry, material],
+  );
 
   useFrame(() => {
     const g = group.current;

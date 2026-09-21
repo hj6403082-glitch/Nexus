@@ -24,6 +24,7 @@ import { cardRegistry } from './cardRegistry';
 import { useModuleData } from '@/stores/useModuleData';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { damp } from '@/core/math/spring';
+import { markContextLost, markContextRestored } from './gpuState';
 
 /**
  * `?nopost` disables the entire post chain.
@@ -36,9 +37,10 @@ import { damp } from '@/core/math/spring';
 const POST_ENABLED =
   typeof window === 'undefined' || !window.location.search.includes('nopost');
 
-export function Scene() {
+export function Scene({ onFail }: { onFail?: (reason: string) => void } = {}) {
   return (
     <Canvas
+      aria-label="NEXUS spatial interface. Use the left and right arrow keys to rotate the module ring, Enter to open the centred module, and Escape to close it. Press Command-K for a searchable list of everything."
       gl={{
         antialias: false,
         alpha: false,
@@ -53,18 +55,19 @@ export function Scene() {
         gl.toneMappingExposure = 1.05;
       }}
     >
-      <SceneBody />
+      <SceneBody onFail={onFail} />
     </Canvas>
   );
 }
 
-function SceneBody() {
+function SceneBody({ onFail }: { onFail?: (reason: string) => void }) {
   const world = useSystemStore((s) => s.world);
   const grade = WORLDS[world];
 
   return (
     <>
       <Probe />
+      <ContextGuard onLost={onFail ?? (() => {})} />
       <MotionGate />
       <PerformanceMonitor />
 
@@ -92,6 +95,53 @@ function SceneBody() {
     </>
   );
 }
+
+/**
+ * WebGL contexts are LENT, not owned.
+ *
+ * A driver reset, a laptop switching GPUs, too many live contexts in other
+ * tabs — any of these takes the context away, and everything drawn with it
+ * stops. The browser will usually give it back if asked, so the default
+ * behaviour (do nothing, leave a frozen canvas) is worth overriding:
+ * preventDefault on the loss event is what makes restoration possible at all.
+ */
+function ContextGuard({ onLost }: { onLost: (reason: string) => void }) {
+  const { gl } = useThree();
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    let timer = 0;
+
+    const lost = (event: Event) => {
+      // Without this, the browser will not attempt to restore the context.
+      event.preventDefault();
+      markContextLost();
+      useSystemStore.getState().pushLog('gpu context lost · attempting restore', 'warn');
+      // If it has not returned after a few seconds it is not coming back on
+      // its own; hand over to the flat mode rather than leave a dead canvas.
+      timer = window.setTimeout(() => {
+        onLost('the GPU context was lost and did not return');
+      }, 6000);
+    };
+
+    const restored = () => {
+      window.clearTimeout(timer);
+      markContextRestored();
+      useSystemStore.getState().pushLog('gpu context restored', 'ok');
+    };
+
+    canvas.addEventListener('webglcontextlost', lost);
+    canvas.addEventListener('webglcontextrestored', restored);
+    return () => {
+      window.clearTimeout(timer);
+      canvas.removeEventListener('webglcontextlost', lost);
+      canvas.removeEventListener('webglcontextrestored', restored);
+    };
+  }, [gl, onLost]);
+
+  return null;
+}
+
 
 /**
  * Reports GPU identity into the HUD, and exposes a read-only snapshot of the

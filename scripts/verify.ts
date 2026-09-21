@@ -18,6 +18,8 @@ import { rank } from '../src/components/launcher/rank.ts';
 import { envelopesFor } from '../src/stores/useTransformStore.ts';
 import { matchCommand } from '../src/ai/commands.ts';
 import { matchWorld, NAMED_WORLDS } from '../src/core/constants/worlds.ts';
+import { MODULES } from '../src/core/constants/modules.ts';
+import { MAX_CARDS } from '../src/scene/human/beadMaterial.ts';
 import { readCondition } from '../src/scene/env/condition.ts';
 import { TwoHandRecognizer } from '../src/gesture/recognizers.ts';
 import { telemetryRows } from '../src/stores/clientTelemetry.ts';
@@ -234,6 +236,14 @@ check('follower deltas back-accumulate into the true curve', () => {
   const series = backAccumulate(1000, deltas);
   assert.deepEqual(series, [940, 950, 970, 1000]);
   assert.equal(series[series.length - 1], 1000, 'the curve must end at the known total');
+});
+
+check('the bead shader has a matrix slot for every module', () => {
+  // MAX_CARDS sizes a GLSL uniform array, which is fixed at compile time and
+  // is NOT bounds-checked. An eleventh module without a matching slot would
+  // read garbage transforms for its particles, during the one sequence nobody
+  // has a console open for.
+  assert.equal(MAX_CARDS, MODULES.length);
 });
 
 console.log('\nAI PROVIDERS');

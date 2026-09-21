@@ -433,6 +433,27 @@ export function useNexus() {
     useAIStore.getState().setStatus('idle');
   }, []);
 
+  /**
+   * Release the camera and the microphone when this hook goes away.
+   *
+   * They were only ever stopped by the user pressing the button again, so an
+   * unmount left the capture running — the camera indicator stays lit, the
+   * MediaPipe graph keeps inferring, and the page is still listening. That is
+   * a privacy problem before it is a resource one, and it is the kind of thing
+   * a user notices in their menu bar long before they notice it in a profile.
+   */
+  useEffect(
+    () => () => {
+      trackerRef.current?.stop();
+      trackerRef.current = null;
+      listenerRef.current?.stop();
+      listenerRef.current = null;
+      speaker.cancel();
+      gestureEngine.reset();
+    },
+    [],
+  );
+
   // ---- boot ---------------------------------------------------------------
   useEffect(() => {
     // Ask which brain is available before the first question rather than
@@ -466,9 +487,21 @@ export function useNexus() {
     return () => clearInterval(interval);
   }, []);
 
+  /**
+   * Open whatever is currently centred.
+   *
+   * The ring could be ROTATED by keyboard but not OPENED, which made it
+   * navigable and useless without a pointer. This is the missing half.
+   */
+  const openCentred = useCallback(() => {
+    const target = useCarouselStore.getState().hovered ?? centredModule();
+    if (target) openModule(target);
+  }, [openModule]);
+
   return useMemo(
     () => ({
       submit,
+      openCentred,
       run,
       say,
       ask,
@@ -479,7 +512,19 @@ export function useNexus() {
       stopListening,
       interrupt,
     }),
-    [submit, run, say, ask, openModule, startTracking, stopTracking, startListening, stopListening, interrupt],
+    [
+      submit,
+      openCentred,
+      run,
+      say,
+      ask,
+      openModule,
+      startTracking,
+      stopTracking,
+      startListening,
+      stopListening,
+      interrupt,
+    ],
   );
 }
 

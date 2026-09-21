@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 export interface BakeResult {
   positions: Float32Array; // xyz per point
@@ -38,7 +38,9 @@ export interface BakeOptions {
  * The bake is a generator so the caller can spend one chunk per frame. A bake
  * that stalls the main thread for 400 ms is a bake the user watches happen.
  */
-export function* bakeSurface(options: BakeOptions): Generator<number, BakeResult, void> {
+export function* bakeSurface(
+  options: BakeOptions,
+): Generator<number, BakeResult, void> {
   const { renderer, glsl, fn, bounds, candidates } = options;
   const rowsPerChunk = options.rowsPerChunk ?? 16;
   const seed = options.seed ?? 7;
@@ -177,70 +179,92 @@ export function* bakeSurface(options: BakeOptions): Generator<number, BakeResult
     }
   };
 
-  // --- projection pass, chunked by rows ------------------------------------
-  quad.material = projectMaterial;
-  for (let row = 0; row < size; row += rowsPerChunk) {
-    const h = Math.min(rowsPerChunk, size - row);
+  /**
+   * Everything below runs inside a try/finally.
+   *
+   * This generator is driven a chunk at a time and can be abandoned between
+   * chunks — the caller stops calling `next()` when the component unmounts or
+   * the bake is cancelled — and it can throw part way through. Either path
+   * used to skip the disposal at the bottom, stranding two float render
+   * targets on the GPU per abandoned bake. A generator's `finally` runs on
+   * `return()` as well as on completion, so this covers both.
+   */
+  try {
+    // --- projection pass, chunked by rows ------------------------------------
+    quad.material = projectMaterial;
+    for (let row = 0; row < size; row += rowsPerChunk) {
+      const h = Math.min(rowsPerChunk, size - row);
+      withRendererState(() => {
+        renderer.setRenderTarget(target);
+        renderer.setScissorTest(true);
+        renderer.setScissor(0, row, size, h);
+        renderer.setViewport(0, 0, size, size);
+        renderer.render(scene, camera);
+      });
+      yield (row / size) * 0.5;
+    }
+
+    // --- normal pass ----------------------------------------------------------
+    quad.material = normalMaterial;
+    for (let row = 0; row < size; row += rowsPerChunk) {
+      const h = Math.min(rowsPerChunk, size - row);
+      withRendererState(() => {
+        renderer.setRenderTarget(normalTarget);
+        renderer.setScissorTest(true);
+        renderer.setScissor(0, row, size, h);
+        renderer.setViewport(0, 0, size, size);
+        renderer.render(scene, camera);
+      });
+      yield 0.5 + (row / size) * 0.4;
+    }
+
+    // --- readback -------------------------------------------------------------
+    let posRaw!: Float32Array;
+    let nrmRaw!: Float32Array;
     withRendererState(() => {
-      renderer.setRenderTarget(target);
-      renderer.setScissorTest(true);
-      renderer.setScissor(0, row, size, h);
-      renderer.setViewport(0, 0, size, size);
-      renderer.render(scene, camera);
+      posRaw = readTarget(renderer, target, size);
+      nrmRaw = readTarget(renderer, normalTarget, size);
     });
-    yield (row / size) * 0.5;
+    yield 0.95;
+
+    const total = size * size;
+    const positions = new Float32Array(total * 3);
+    const normals = new Float32Array(total * 3);
+    let count = 0;
+    for (let i = 0; i < total; i++) {
+      if (posRaw[i * 4 + 3] < 0.5) continue; // failed to converge
+      positions[count * 3] = posRaw[i * 4];
+      positions[count * 3 + 1] = posRaw[i * 4 + 1];
+      positions[count * 3 + 2] = posRaw[i * 4 + 2];
+      normals[count * 3] = nrmRaw[i * 4];
+      normals[count * 3 + 1] = nrmRaw[i * 4 + 1];
+      normals[count * 3 + 2] = nrmRaw[i * 4 + 2];
+      count++;
+    }
+
+    return {
+      positions: positions.subarray(0, count * 3),
+      normals: normals.subarray(0, count * 3),
+      count,
+    };
+  } finally {
+    target.dispose();
+    normalTarget.dispose();
+    projectMaterial.dispose();
+    normalMaterial.dispose();
+    quad.geometry.dispose();
+    scene.clear();
   }
-
-  // --- normal pass ----------------------------------------------------------
-  quad.material = normalMaterial;
-  for (let row = 0; row < size; row += rowsPerChunk) {
-    const h = Math.min(rowsPerChunk, size - row);
-    withRendererState(() => {
-      renderer.setRenderTarget(normalTarget);
-      renderer.setScissorTest(true);
-      renderer.setScissor(0, row, size, h);
-      renderer.setViewport(0, 0, size, size);
-      renderer.render(scene, camera);
-    });
-    yield 0.5 + (row / size) * 0.4;
-  }
-
-  // --- readback -------------------------------------------------------------
-  let posRaw!: Float32Array;
-  let nrmRaw!: Float32Array;
-  withRendererState(() => {
-    posRaw = readTarget(renderer, target, size);
-    nrmRaw = readTarget(renderer, normalTarget, size);
-  });
-  yield 0.95;
-
-  const total = size * size;
-  const positions = new Float32Array(total * 3);
-  const normals = new Float32Array(total * 3);
-  let count = 0;
-  for (let i = 0; i < total; i++) {
-    if (posRaw[i * 4 + 3] < 0.5) continue; // failed to converge
-    positions[count * 3] = posRaw[i * 4];
-    positions[count * 3 + 1] = posRaw[i * 4 + 1];
-    positions[count * 3 + 2] = posRaw[i * 4 + 2];
-    normals[count * 3] = nrmRaw[i * 4];
-    normals[count * 3 + 1] = nrmRaw[i * 4 + 1];
-    normals[count * 3 + 2] = nrmRaw[i * 4 + 2];
-    count++;
-  }
-
-  target.dispose();
-  normalTarget.dispose();
-  projectMaterial.dispose();
-  normalMaterial.dispose();
-  quad.geometry.dispose();
-
-  return { positions: positions.subarray(0, count * 3), normals: normals.subarray(0, count * 3), count };
 }
 
-function makeTarget(renderer: THREE.WebGLRenderer, size: number): THREE.WebGLRenderTarget {
+function makeTarget(
+  renderer: THREE.WebGLRenderer,
+  size: number,
+): THREE.WebGLRenderTarget {
   return new THREE.WebGLRenderTarget(size, size, {
-    type: supportsHalfFloatRead(renderer) ? THREE.HalfFloatType : THREE.FloatType,
+    type: supportsHalfFloatRead(renderer)
+      ? THREE.HalfFloatType
+      : THREE.FloatType,
     format: THREE.RGBAFormat,
     minFilter: THREE.NearestFilter,
     magFilter: THREE.NearestFilter,
@@ -279,7 +303,8 @@ export function halfToFloat(h: number): number {
   const sign = (h & 0x8000) >> 15;
   const exponent = (h & 0x7c00) >> 10;
   const fraction = h & 0x03ff;
-  if (exponent === 0) return (sign ? -1 : 1) * Math.pow(2, -14) * (fraction / 1024);
+  if (exponent === 0)
+    return (sign ? -1 : 1) * Math.pow(2, -14) * (fraction / 1024);
   if (exponent === 0x1f) return fraction ? NaN : (sign ? -1 : 1) * Infinity;
   return (sign ? -1 : 1) * Math.pow(2, exponent - 15) * (1 + fraction / 1024);
 }

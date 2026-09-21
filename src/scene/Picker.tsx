@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useCarouselStore } from '@/stores/useCarouselStore';
@@ -24,40 +24,71 @@ import type { ModuleId } from '@/core/constants/modules';
  * fallback, exactly as the brief requires, but a fallback that does not work is
  * not one — so it hovers, selects and drags identically.
  */
+/** How far the cursor may travel during a press and still count as a click. */
+const CLICK_SLOP = 0.28;
+
 export function Picker() {
   const { camera, gl } = useThree();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const ndc = useMemo(() => new THREE.Vector2(), []);
 
-  // A click on the canvas opens whatever is hovered. Clicks that land on the
-  // HUD, the palette or the controls are somebody else's business.
+  /**
+   * A press on the canvas picks up whatever is hovered; the release either
+   * opens it (a click) or lets it spring home (a drag).
+   *
+   * The press position is captured HERE, in the same handler that starts the
+   * drag, rather than by a separate listener. It used to be tracked by a
+   * module-scope listener registered at import time — which was never removed,
+   * and which fired on every pointerdown anywhere on the page, so clicking the
+   * HUD or the palette silently overwrote the reference point that decides
+   * whether the next release counts as a click or a drag.
+   */
+  const pressCursor = useRef<{ x: number; y: number; z: number } | null>(null);
+
   useEffect(() => {
     const canvas = gl.domElement;
+
     const onDown = (e: PointerEvent) => {
       if (e.target !== canvas) return;
       if (useTransformStore.getState().phase !== 'NORMAL') return;
       const { hovered } = useCarouselStore.getState();
       if (!hovered) return;
+      const c = useGestureStore.getState().cursor;
+      pressCursor.current = { x: c.x, y: c.y, z: c.z };
       useCarouselStore.getState().setDragging(hovered);
     };
+
     const onUp = () => {
       const carousel = useCarouselStore.getState();
       const dragged = carousel.dragging;
       if (!dragged) return;
       carousel.setDragging(null);
-      // A press that barely moved is a click, and a click opens the module.
-      if (!movedFar()) {
+
+      // A press that barely travelled is a click, and a click opens the module.
+      const start = pressCursor.current;
+      const c = useGestureStore.getState().cursor;
+      const travelled = start
+        ? Math.hypot(c.x - start.x, c.y - start.y, c.z - start.z)
+        : 0;
+      pressCursor.current = null;
+
+      if (travelled <= CLICK_SLOP) {
         carousel.present(dragged);
         audio.play('open', 0.6);
       } else {
         audio.play('confirm', 0.4);
       }
     };
+
     canvas.addEventListener('pointerdown', onDown);
     window.addEventListener('pointerup', onUp);
+    // A pointer that leaves the window never fires pointerup, and a card left
+    // in the dragging state would follow the cursor forever.
+    window.addEventListener('pointercancel', onUp);
     return () => {
       canvas.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
   }, [gl]);
 
@@ -109,23 +140,4 @@ export function Picker() {
   });
 
   return null;
-}
-
-/**
- * Whether the pointer travelled far enough between press and release for this
- * to be a drag rather than a click. Measured against the published cursor, so
- * it works identically for a hand.
- */
-let pressCursor: { x: number; y: number; z: number } | null = null;
-if (typeof window !== 'undefined') {
-  window.addEventListener('pointerdown', () => {
-    const c = useGestureStore.getState().cursor;
-    pressCursor = { x: c.x, y: c.y, z: c.z };
-  });
-}
-
-function movedFar(): boolean {
-  if (!pressCursor) return false;
-  const c = useGestureStore.getState().cursor;
-  return Math.hypot(c.x - pressCursor.x, c.y - pressCursor.y, c.z - pressCursor.z) > 0.28;
 }

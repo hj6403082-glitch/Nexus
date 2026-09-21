@@ -1,7 +1,16 @@
 import * as THREE from 'three';
+import { MODULES } from '@/core/constants/modules';
 import { JAW } from './anatomy';
 
-export const MAX_CARDS = 10;
+/**
+ * The card-matrix uniform array is sized at SHADER COMPILE TIME, so it cannot
+ * grow with the module registry. Deriving it from `MODULES.length` means
+ * adding an eleventh module widens the array instead of silently indexing past
+ * the end of it — GLSL does not bounds-check, and the failure would be a
+ * handful of particles reading garbage transforms during the one sequence
+ * nobody is looking at the console for.
+ */
+export const MAX_CARDS = MODULES.length;
 
 /**
  * THE BEADS.
