@@ -3,6 +3,10 @@
 import { create } from 'zustand';
 import { MODULE_BY_ID, type ModuleId } from '@/core/constants/modules';
 import type { FaceData } from '@/scene/CardFacePainter';
+import sampleModules from '@/generated/sampleModules.json';
+
+/** Set by the static export build; absent in the normal server build. */
+export const STATIC_MODE = process.env.NEXT_PUBLIC_STATIC === '1';
 
 export interface ModuleRecord {
   face: FaceData;
@@ -34,6 +38,38 @@ export const useModuleData = create<ModuleDataState>()((set, get) => ({
     const existing = get().records[id];
     if (!force && existing && Date.now() - existing.fetchedAt < TTL) return;
     if (get().inflight[id]) return;
+
+    /**
+     * STATIC MODE — a build with no server behind it.
+     *
+     * The hosted preview has no `/api/*`, and a ring of cards all reading
+     * "unreachable" would show nothing of what NEXUS actually is. The frozen
+     * payloads are produced by running the REAL adapters with no API keys at
+     * build time, so the faces are shaped by the same code that serves them
+     * in production rather than by a hand-written copy that would drift.
+     */
+    if (STATIC_MODE) {
+      // JSON imports widen tuple types ([string, string][] becomes string[][]),
+      // so the cast goes through unknown rather than pretending they overlap.
+      const frozen = (sampleModules as unknown as Record<
+        string,
+        { face: FaceData; detail: unknown }
+      >)[id];
+      if (frozen) {
+        set((s) => ({
+          records: {
+            ...s.records,
+            [id]: {
+              face: frozen.face,
+              detail: frozen.detail,
+              fetchedAt: Date.now(),
+              provenance: 'sample',
+            },
+          },
+        }));
+        return;
+      }
+    }
 
     if (!def.endpoint) {
       set((s) => ({

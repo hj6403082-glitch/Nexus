@@ -7,3 +7,6 @@ out
 .DS_Store
 
 .verify-shots
+
+.next-static
+src/generated

@@ -9,7 +9,7 @@ import { HandTracker } from '@/gesture/HandTracker';
 import { useAIStore } from '@/stores/useAIStore';
 import { useCarouselStore } from '@/stores/useCarouselStore';
 import { useGestureStore } from '@/stores/useGestureStore';
-import { useModuleData } from '@/stores/useModuleData';
+import { STATIC_MODE, useModuleData } from '@/stores/useModuleData';
 import { useSystemStore } from '@/stores/useSystemStore';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { MODULES, MODULE_BY_ID, type ModuleId } from '@/core/constants/modules';
@@ -459,6 +459,16 @@ export function useNexus() {
     // Ask which brain is available before the first question rather than
     // after it, so the HUD can say "offline" up front instead of the user
     // discovering it by being ignored.
+    if (STATIC_MODE) {
+      // No server, so no brain. Say so plainly rather than failing a fetch.
+      useAIStore.getState().setProvider({
+        name: 'none',
+        model: '',
+        reason: 'Static preview — run NEXUS locally for voice and chat.',
+      });
+      useAIStore.getState().setStatus('offline');
+      useSystemStore.getState().pushLog('static preview · ai offline', 'warn');
+    } else {
     void fetch('/api/ai')
       .then((r) => r.json())
       .then((info: { provider: string; model: string; reason: string }) => {
@@ -479,6 +489,7 @@ export function useNexus() {
       .catch(() => {
         useAIStore.getState().setStatus('offline');
       });
+    }
 
     void useModuleData.getState().loadAll();
     const interval = setInterval(() => {

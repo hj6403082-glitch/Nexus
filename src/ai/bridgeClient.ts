@@ -6,6 +6,11 @@ let capabilities: { enabled: boolean; apps: string[] } | null = null;
 
 export async function bridgeCapabilities(): Promise<{ enabled: boolean; apps: string[] }> {
   if (capabilities) return capabilities;
+  // A static build has no server to shell out from.
+  if (process.env.NEXT_PUBLIC_STATIC === '1') {
+    capabilities = { enabled: false, apps: [] };
+    return capabilities;
+  }
   try {
     const res = await fetch('/api/bridge');
     const json = (await res.json()) as { enabled: boolean; apps: string[] };

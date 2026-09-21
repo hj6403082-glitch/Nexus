@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "verify": "node scripts/lint-shaders.mjs && node --experimental-strip-types --import ./scripts/register.mjs scripts/verify.ts",
     "verify:visual": "node scripts/verify-visual.mjs",
-    "lint:shaders": "node scripts/lint-shaders.mjs"
+    "lint:shaders": "node scripts/lint-shaders.mjs",
+    "build:static": "node scripts/build-static.mjs",
+    "samples": "node --experimental-strip-types --import ./scripts/register.mjs scripts/generate-samples.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
