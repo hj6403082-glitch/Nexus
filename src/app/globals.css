@@ -8,8 +8,22 @@
   --color-nexus-dim: #7c8ba3;
   --color-nexus-accent: #7cb2ff;
   --color-nexus-warn: #f59440;
+  --color-nexus-bad: #ff6b6b;
 
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  /*
+   * ONE EASING AND ONE BEAT, shared with the scene.
+   *
+   * `BEAT` in `core/constants/motion.ts` is 0.42s and every scene transition
+   * is a multiple of it. The DOM layer used to pick its own durations, so a
+   * panel and the card it belonged to arrived at different times and the
+   * interface felt like two programs sharing a window. These are the same
+   * numbers, expressed where CSS can reach them.
+   */
+  --ease-nexus: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-beat: 420ms;
+  --duration-half-beat: 210ms;
 }
 
 html,
@@ -29,6 +43,7 @@ body {
     'Segoe UI',
     sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* The scene owns the viewport; nothing scrolls behind it. */
@@ -38,6 +53,64 @@ body:has(canvas) {
 
 ::selection {
   background: rgb(124 178 255 / 0.28);
+}
+
+/*
+ * FOCUS HAS TO BE VISIBLE.
+ *
+ * Every control here is keyboard reachable — the ring rotates on arrows and
+ * opens on Enter — but nothing SHOWED which control had focus, so tabbing
+ * through the interface was navigating blind. `:focus-visible` rather than
+ * `:focus` keeps it off for pointer users, who do not need it and are
+ * distracted by it.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-nexus-accent);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+/*
+ * A control the interface is BUSY with, e.g. a camera warming up. The pulse is
+ * on opacity only: anything that moves the element itself makes the dock feel
+ * unstable when two controls are busy at once.
+ */
+@keyframes nexus-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.nexus-busy {
+  animation: nexus-pulse 1.6s var(--ease-nexus) infinite;
+}
+
+/* The scan line that runs the length of a control while it is live. */
+@keyframes nexus-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(200%);
+  }
+}
+
+.nexus-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(124 178 255 / 0.18),
+    transparent
+  );
+  animation: nexus-sweep 2.6s var(--ease-nexus) infinite;
+  pointer-events: none;
 }
 
 /*
@@ -54,5 +127,10 @@ body:has(canvas) {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* An infinite sweep with a 0.01ms duration is a strobe, so remove it. */
+  .nexus-sweep::after {
+    display: none;
   }
 }

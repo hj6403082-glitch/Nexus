@@ -267,7 +267,24 @@ export function Card({ module, index, count, radius }: CardProps) {
     g.rotation.set(0, worldAngle + Math.PI, 0);
 
     innerGroup.rotation.set(springs.tilt.value, 0, rollZ + springs.tilt.value * 0.4);
-    const s = springs.scale.value;
+
+    /**
+     * OFF-CENTRE CARDS ARE SMALLER.
+     *
+     * A rectilinear projection magnifies whatever sits at the edge of the
+     * frame, and with ten cards 36 degrees apart the neighbours sit exactly
+     * there. Un-compensated they rendered HALF AGAIN as large as the card in
+     * the middle, despite being the same distance away — so the eye read the
+     * two clipped slabs at the edges as the subject and the centred card as
+     * something behind them.
+     *
+     * The falloff runs over the whole half-turn, deliberately unlike
+     * `centred` above: this is about depth ordering across the ring, not about
+     * the last few degrees of arrival.
+     */
+    const presence = clamp01((facing + 1) * 0.5);
+    const perspectiveTrim = 0.62 + 0.38 * presence * presence;
+    const s = springs.scale.value * perspectiveTrim;
     innerGroup.scale.set(s, s, s);
 
     // During the transformation the card turns to face the core at the centre.

@@ -107,7 +107,19 @@ export class CardFacePainter {
 
     if (data.rows) {
       g.font = '400 24px ui-monospace, SFMono-Regular, Menlo, monospace';
-      for (const [label, value] of data.rows.slice(0, 7)) {
+      /**
+       * Only as many rows as there is room for.
+       *
+       * The cap used to be a flat seven, which is right for a card with no
+       * sparkline and two rows too many for one with. On the Instagram card
+       * the last row landed exactly on the provenance strip and "growth (30d)
+       * +8.1%" was overprinted with "sample · no token configured" — two legible
+       * strings rendered into an illegible one.
+       */
+      const ROW_H = 46;
+      const room = Math.max(0, FACE_H - 56 - 22 - y);
+      const fits = Math.min(7, Math.floor(room / ROW_H));
+      for (const [label, value] of data.rows.slice(0, fits)) {
         g.fillStyle = 'rgba(150, 168, 198, 0.9)';
         g.fillText(label, 34, y);
         g.fillStyle = '#dce6f6';

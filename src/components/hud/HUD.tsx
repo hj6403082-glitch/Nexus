@@ -14,6 +14,12 @@ import { BEAT } from '@/core/constants/motion';
  * that moves unless the thing it reports moved. It is instrumentation, not
  * decoration: every glyph answers a question the user would otherwise have to
  * guess at.
+ *
+ * It also has to GET OUT OF THE WAY. The two bottom corners and the dock all
+ * sat at `bottom-6`, so on any window under about 1200px the log ran straight
+ * underneath the buttons and the gesture readout collided with them. The
+ * bottom corners now clear the dock's height, and below `sm` the left column
+ * stands down entirely rather than fighting for the same 340 pixels.
  */
 export function HUD() {
   const visible = useSystemStore((s) => s.hudVisible);
@@ -44,11 +50,22 @@ function TopLeft() {
   const world = useSystemStore((s) => s.world);
 
   return (
-    <div className="absolute left-6 top-6 space-y-1.5 font-mono text-[11px] tracking-wide">
+    <div className="absolute left-4 top-4 max-w-[min(42vw,320px)] space-y-1.5 font-mono text-[11px] tracking-wide sm:left-6 sm:top-6">
       <div className="text-[13px] font-medium tracking-[0.35em] text-nexus-ink">NEXUS</div>
       <Row label="fps" value={String(fps)} tone={fps < 45 ? 'warn' : 'ok'} />
       <Row label="tier" value={`${tier} / 3`} />
-      <Row label="gpu" value={webgl ? gpu : 'software'} tone={webgl ? 'dim' : 'warn'} />
+      {/*
+        * The renderer string is a sentence, not a word: "Google, Vulkan 1.3.0
+        * (SwiftShader Device (LLVM 20.1.8) (0x0000C0DE))" wrapped onto three
+        * lines and pushed the rest of the column down the screen. Truncated,
+        * with the whole thing on the title so it is still readable.
+        */}
+      <Row
+        label="gpu"
+        value={webgl ? gpu : 'software'}
+        tone={webgl ? 'dim' : 'warn'}
+        truncate
+      />
       <Row
         label="track"
         value={tracking}
@@ -72,7 +89,7 @@ function TopRight() {
   if (!now) return null;
 
   return (
-    <div className="absolute right-6 top-6 text-right font-mono">
+    <div className="absolute right-4 top-4 text-right font-mono sm:right-6 sm:top-6">
       <div className="text-[26px] font-light leading-none tabular-nums text-nexus-ink">
         {now.toTimeString().slice(0, 5)}
         <span className="text-[14px] text-nexus-dim">:{now.toTimeString().slice(6, 8)}</span>
@@ -89,7 +106,7 @@ function BottomLeft() {
   const recent = log.slice(-6);
 
   return (
-    <div className="absolute bottom-6 left-6 w-[340px] space-y-1 font-mono text-[10.5px]">
+    <div className="absolute bottom-24 left-6 hidden w-[320px] space-y-1 font-mono text-[10.5px] sm:block xl:bottom-6">
       <AnimatePresence initial={false}>
         {recent.map((entry) => (
           <motion.div
@@ -100,17 +117,18 @@ function BottomLeft() {
             transition={{ duration: BEAT, ease: [0.22, 1, 0.36, 1] }}
             className="flex gap-2"
           >
-            <span className="text-nexus-dim/60 tabular-nums">
+            <span className="shrink-0 text-nexus-dim/60 tabular-nums">
               {new Date(entry.at).toTimeString().slice(0, 8)}
             </span>
             <span
-              className={
+              className={`min-w-0 truncate ${
                 entry.level === 'warn'
                   ? 'text-nexus-warn'
                   : entry.level === 'ok'
                     ? 'text-nexus-accent'
                     : 'text-nexus-dim'
-              }
+              }`}
+              title={entry.text}
             >
               {entry.text}
             </span>
@@ -135,7 +153,7 @@ function BottomRight() {
   }, [gestureAt]);
 
   return (
-    <div className="absolute bottom-6 right-6 space-y-1.5 text-right font-mono text-[11px]">
+    <div className="absolute bottom-24 right-6 space-y-1.5 text-right font-mono text-[11px] xl:bottom-6">
       <Row
         label="gesture"
         value={gesture}
@@ -169,18 +187,25 @@ function Row({
   value,
   tone = 'dim',
   align = 'left',
+  truncate = false,
 }: {
   label: string;
   value: string;
   tone?: 'ok' | 'warn' | 'dim';
   align?: 'left' | 'right';
+  truncate?: boolean;
 }) {
   const colour =
     tone === 'warn' ? 'text-nexus-warn' : tone === 'ok' ? 'text-nexus-accent' : 'text-nexus-ink/70';
   return (
     <div className={`flex gap-2 ${align === 'right' ? 'justify-end' : ''}`}>
-      <span className="text-nexus-dim/60 uppercase tracking-[0.18em]">{label}</span>
-      <span className={`${colour} tabular-nums`}>{value}</span>
+      <span className="shrink-0 text-nexus-dim/60 uppercase tracking-[0.18em]">{label}</span>
+      <span
+        className={`${colour} tabular-nums ${truncate ? 'min-w-0 truncate' : ''}`}
+        title={truncate ? value : undefined}
+      >
+        {value}
+      </span>
     </div>
   );
 }

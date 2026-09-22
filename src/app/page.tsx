@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useState } from 'react';
 import { Boot } from '@/components/Boot';
 import { HUD } from '@/components/hud/HUD';
+import { RingRail } from '@/components/hud/RingRail';
 import { MotionControl } from '@/components/hud/MotionControl';
 import { CommandPalette } from '@/components/launcher/CommandPalette';
 import { HolographicText } from '@/components/panels/HolographicText';
@@ -83,6 +84,7 @@ export default function Page() {
       </SceneBoundary>
       <Boot />
       <HUD />
+      <RingRail />
       <MotionControl />
       <WakeOverlay />
       <HolographicText />

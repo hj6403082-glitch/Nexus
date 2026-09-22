@@ -75,16 +75,29 @@ export function* bakeSurface(
       return mix(uMin, uMax, vec3(a, b, c));
     }
 
-    vec3 fieldNormal(vec3 p) {
-      const float e = 0.0015;
-      vec2 k = vec2(1.0, -1.0);
-      return normalize(
-        k.xyy * ${fn}(p + k.xyy * e) +
-        k.yyx * ${fn}(p + k.yyx * e) +
-        k.yxy * ${fn}(p + k.yxy * e) +
-        k.xxx * ${fn}(p + k.xxx * e)
-      );
+    /**
+     * The UNNORMALISED gradient, by central differences.
+     *
+     * The magnitude is the whole point. A field built from smooth minima is
+     * not a true distance field: inside a blend, |grad| falls well below 1 and
+     * the field UNDERSTATES how far away the surface is. A Newton step that
+     * assumes |grad| = 1 therefore under-steps exactly where the blends are
+     * widest — and the widest blend here is the 75 mm seam down the middle of
+     * the chest, which is precisely where the figure had a vertical streak of
+     * holes punched through it. The points were not missing because the
+     * selection dropped them; they were missing because forty under-steps
+     * never reached the tolerance and the projection marked them invalid.
+     */
+    vec3 fieldGradient(vec3 p) {
+      const float e = 0.0008;
+      return vec3(
+        ${fn}(p + vec3(e, 0.0, 0.0)) - ${fn}(p - vec3(e, 0.0, 0.0)),
+        ${fn}(p + vec3(0.0, e, 0.0)) - ${fn}(p - vec3(0.0, e, 0.0)),
+        ${fn}(p + vec3(0.0, 0.0, e)) - ${fn}(p - vec3(0.0, 0.0, e))
+      ) / (2.0 * e);
     }
+
+    vec3 fieldNormal(vec3 p) { return normalize(fieldGradient(p)); }
   `;
 
   const projectMaterial = new THREE.RawShaderMaterial({
@@ -105,18 +118,29 @@ export function* bakeSurface(
       out vec4 fragColor;
       void main() {
         vec3 p = seedPoint(gl_FragCoord.xy);
-        // Newton steps. The field is not a true distance field after smin, so
-        // each step is damped slightly to stop it overshooting into a
-        // neighbouring lobe and landing on the wrong side of a blend.
-        for (int i = 0; i < 40; i++) {
+
+        // The true Newton step for a scalar field: g * d / |g|^2. Dividing by
+        // the gradient's own magnitude is what makes this converge inside a
+        // blend as fast as it does on a bare sphere. Still damped slightly, to
+        // stop it crossing into a neighbouring lobe and settling on the wrong
+        // side of a seam.
+        for (int i = 0; i < 48; i++) {
           float d = ${fn}(p);
-          if (abs(d) < 0.00025) break;
-          p -= fieldNormal(p) * d * 0.85;
+          vec3 g = fieldGradient(p);
+          float g2 = max(dot(g, g), 1e-4);
+          if (abs(d) / max(sqrt(g2), 1e-3) < 0.00015) break;
+          p -= g * (d / g2) * 0.9;
         }
+
+        // Acceptance is measured in TRUE distance — the field value divided by
+        // its own gradient — not in raw field units. Judging a blend region by
+        // its raw value rejects points that are in fact on the surface.
         float d = ${fn}(p);
+        vec3 g = fieldGradient(p);
+        float trueDistance = abs(d) / max(length(g), 1e-3);
         // A point that failed to converge is marked invalid rather than kept:
         // a stray point inside the head is far more visible than a missing one.
-        float ok = step(abs(d), 0.0015);
+        float ok = step(trueDistance, 0.0012);
         fragColor = vec4(p, ok);
       }
     `,

@@ -56,11 +56,23 @@ export const useModuleData = create<ModuleDataState>()((set, get) => ({
         { face: FaceData; detail: unknown }
       >)[id];
       if (frozen) {
+        /**
+         * The System module is still LIVE here, even with no server.
+         *
+         * Its interesting half — cores, battery, link speed, GPU, storage
+         * quota — is read from the browser, and the browser is present in a
+         * static build. Serving it the frozen server-side payload instead
+         * replaced six real readings with a Node process's heap size, which
+         * is both duller and, on a page that has no Node process behind it,
+         * untrue.
+         */
+        const face =
+          id === 'system' ? await enrichSystem(frozen.face) : frozen.face;
         set((s) => ({
           records: {
             ...s.records,
             [id]: {
-              face: frozen.face,
+              face,
               detail: frozen.detail,
               fetchedAt: Date.now(),
               provenance: 'sample',
@@ -105,22 +117,9 @@ export const useModuleData = create<ModuleDataState>()((set, get) => ({
        * replacing the other.
        */
       if (id === 'system') {
-        const { readClientTelemetry, telemetryRows } = await import('./clientTelemetry');
-        const telemetry = await readClientTelemetry();
-        face = {
-          ...face,
-          rows: telemetryRows(telemetry, face.rows ?? []),
-          metric: telemetry.cores ? String(telemetry.cores) : face.metric,
-          metricLabel: telemetry.cores ? 'logical cores' : face.metricLabel,
-          status: telemetry.battery && telemetry.battery.level < 0.15 && !telemetry.battery.charging
-            ? 'battery low'
-            : 'nominal',
-          // The only thing in the System module that earns warning orange.
-          warned: Boolean(
-            telemetry.battery && telemetry.battery.level < 0.15 && !telemetry.battery.charging,
-          ),
-        };
-        detail = { server: json.detail, client: telemetry };
+        const { readClientTelemetry } = await import('./clientTelemetry');
+        face = await enrichSystem(face);
+        detail = { server: json.detail, client: await readClientTelemetry() };
       }
 
       set((s) => ({
@@ -162,3 +161,27 @@ export const useModuleData = create<ModuleDataState>()((set, get) => ({
     await Promise.all(Object.keys(MODULE_BY_ID).map((id) => get().load(id as ModuleId)));
   },
 }));
+
+/**
+ * Merge the browser's own telemetry into the System face.
+ *
+ * Shared by the live path and the static one: a Node process cannot report the
+ * battery, the link speed, the GPU or the origin's disk usage, and the browser
+ * can do all four whether or not there is a server on the other end.
+ */
+async function enrichSystem(face: FaceData): Promise<FaceData> {
+  const { readClientTelemetry, telemetryRows } = await import('./clientTelemetry');
+  const telemetry = await readClientTelemetry();
+  const lowBattery = Boolean(
+    telemetry.battery && telemetry.battery.level < 0.15 && !telemetry.battery.charging,
+  );
+  return {
+    ...face,
+    rows: telemetryRows(telemetry, face.rows ?? []),
+    metric: telemetry.cores ? String(telemetry.cores) : face.metric,
+    metricLabel: telemetry.cores ? 'logical cores' : face.metricLabel,
+    status: lowBattery ? 'battery low' : 'nominal',
+    // The only thing in the System module that earns warning orange.
+    warned: lowBattery,
+  };
+}

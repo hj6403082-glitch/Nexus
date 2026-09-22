@@ -48,7 +48,18 @@ export function Scene({ onFail }: { onFail?: (reason: string) => void } = {}) {
         stencil: false,
       }}
       dpr={[1, 1.85]}
-      camera={{ fov: 46, near: 0.05, far: 80, position: [0, 0.12, -0.35] }}
+      /**
+        * 54 degrees, not 46.
+        *
+        * Ten cards on a circle are 36 degrees apart, and a 46-degree vertical
+        * frustum on a 16:9 window spans about 68 degrees across — so the two
+        * cards either side of centre fell exactly on the frame edge and the
+        * "circular orbit" rendered as one card with two slivers. At 54 the
+        * horizontal span is about 80 degrees and the neighbours are wholly
+        * inside it, which is the difference between a carousel you can read
+        * and a card with decoration at the edges.
+        */
+      camera={{ fov: 54, near: 0.05, far: 80, position: [0, 0.12, -0.35] }}
       onCreated={({ gl }) => {
         gl.setClearColor(new THREE.Color('#04060b'), 1);
         gl.toneMapping = THREE.ACESFilmicToneMapping;

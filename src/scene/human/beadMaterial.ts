@@ -13,6 +13,16 @@ import { JAW } from './anatomy';
 export const MAX_CARDS = MODULES.length;
 
 /**
+ * The key light, in the figure's own frame.
+ *
+ * Exported because the cast shadows are BAKED against it (see `lighting.ts`).
+ * A key that is one vector in the bake and another in the shader puts every
+ * shadow on the wrong side of every feature, and the result looks like a
+ * rendering bug rather than like a light — so there is one vector.
+ */
+export const KEY_DIR: [number, number, number] = [-0.66, 0.52, 0.42];
+
+/**
  * THE BEADS.
  *
  * Drawn as OPAQUE SPHERE IMPOSTORS that write a curved depth — not as additive
@@ -28,8 +38,16 @@ export const MAX_CARDS = MODULES.length;
  *
  * And NO RIM TERM. A rim light is the standard way to separate a subject from
  * its background, and it is precisely what made the first version read as a
- * bright outline around an empty shape. The form here is carried by the key
- * falling across it, nothing else.
+ * bright outline around an empty shape.
+ *
+ * The form is carried instead by BAKED DARK — an ambient occlusion term and a
+ * cast-shadow term computed once against the same field that produced the
+ * surface (see `lighting.ts`). This is the difference between a face and a
+ * mask of a face. A Lambert term knows which way a patch points and nothing
+ * about what stands in front of it, so under a bare key a nose and a painted
+ * nose shade identically. The well under the brow, the crease beside the nose
+ * and the shadow the nose throws are what a viewer actually reads, and none of
+ * them exist without asking the field.
  *
  * Tens of thousands of beads, not hundreds of thousands. At 5 mm spacing the
  * beads merged and the surface went to plastic; the dots have to stay
@@ -73,7 +91,7 @@ export function makeBeadMaterial(): THREE.ShaderMaterial {
       uJawPivot: { value: new THREE.Vector3(...JAW.pivot) },
       uJawAxis: { value: new THREE.Vector3(...JAW.axis) },
       uMouthLevel: { value: 0 },
-      uKeyDir: { value: new THREE.Vector3(-0.66, 0.52, 0.42).normalize() },
+      uKeyDir: { value: new THREE.Vector3(...KEY_DIR).normalize() },
       uBreath: { value: 0 },
       uHeadYaw: { value: 0 },
       uViewportHeight: { value: 1080 },
@@ -100,6 +118,9 @@ in float aJawWeight;   // 1 = belongs to the jaw, 0 = cranium
 in float aSeam;        // 0..1, 1 exactly on the lip seam
 in float aEye;         // 1 for the two eye points
 in float aKind;        // 0 pane glass · 1 type fragment · 2 accent stream
+in float aSpread;      // metres to this bead's own 5th-nearest neighbour
+in float aOcclusion;   // 1 open to the sky, 0 deep in a crevice
+in float aShadow;      // 1 lit by the key, 0 in its cast shadow
 
 uniform mat4 uCardMatrix[${MAX_CARDS}];
 uniform vec3 uCorePosition;
@@ -127,6 +148,8 @@ out float vEye;
 out float vFormed;
 out vec3 vViewPos;
 out float vRadius;
+out float vOcc;
+out float vShadow;
 
 vec3 rotateAbout(vec3 p, vec3 pivot, vec3 axis, float angle) {
   vec3 v = p - pivot;
@@ -197,6 +220,8 @@ void main() {
   vKind = aKind;
   vSeam = aSeam;
   vEye = aEye;
+  vOcc = aOcclusion;
+  vShadow = aShadow;
 
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   vViewPos = mv.xyz;
@@ -210,7 +235,16 @@ void main() {
   // that guarantees neighbouring beads still touch. Letting a bead stay small
   // because it happened to come from a glyph punched holes all over the face.
   float kindScale = aKind > 1.5 ? 0.9 : (aKind > 0.5 ? 0.72 : 1.15);
-  float radius = 0.0042 * uBeadSize * mix(kindScale, 1.0, vFormed);
+  // On the figure the radius comes from THIS bead's own neighbourhood, so a
+  // sparse patch grows beads until they touch while a dense one keeps small
+  // ones and stays legible as dots. One global radius could do neither.
+  //
+  // 0.50 of the measured gap. The fragment stage draws each bead into a quad
+  // 1.35x the sphere's own projected size, so the covered radius is ~0.68 of
+  // the gap and neighbours overlap by about a third — no holes, and each bead
+  // still resolves as a bead.
+  float figureRadius = aSpread * 0.50 * uBeadSize;
+  float radius = mix(0.0042 * kindScale, figureRadius, vFormed);
   vRadius = radius;
 
   // Point size in pixels for a sphere of this radius at this depth. Beads must
@@ -234,6 +268,8 @@ in float vEye;
 in float vFormed;
 in vec3 vViewPos;
 in float vRadius;
+in float vOcc;
+in float vShadow;
 
 uniform vec3 uKeyDir;
 uniform float uProjA;
@@ -261,21 +297,39 @@ void main() {
   float ndcZ = (uProjA * surface.z + uProjB) / max(-surface.z, 1e-5);
   gl_FragDepth = clamp(ndcZ * 0.5 + 0.5, 0.0, 1.0);
 
-  // Shading. Blue in shadow, lighter blue where the key lands, and a glow only
-  // where the surface faces the key squarely. No rim term — see beadMaterial's
-  // header for why that matters more than it sounds like it should.
-  vec3 n = normalize(mix(impostorNormal, vNormal, 0.65));
+  // Shading. Three lights and two baked occlusion terms — see this file's
+  // header for why the dark does more work here than the light.
+  // Weighted hard toward the SURFACE normal. Each bead carries its own sphere
+  // normal too, which is what keeps the dots legible as dots — but at 0.68 the
+  // per-bead component was loud enough to read as popcorn across a cheek that
+  // is supposed to be one smooth plane.
+  vec3 n = normalize(mix(impostorNormal, vNormal, 0.86));
   float key = max(dot(n, normalize(uKeyDir)), 0.0);
 
-  vec3 shadowBlue = vec3(0.055, 0.105, 0.225);
-  vec3 litBlue    = vec3(0.42, 0.62, 0.95);
-  vec3 base = mix(shadowBlue, litBlue, key);
+  // The key, gated by whether anything stands between this point and it. Not
+  // gated to zero: a real shadow still catches bounced light, and a hard zero
+  // reads as a hole punched in the face.
+  vec3 base = vec3(0.42, 0.60, 0.88) * key * mix(0.12, 1.0, vShadow);
 
-  // Squarely-facing glow. Clamped before the pow: two unit vectors can dot to
-  // 1.0000001, pow of a negative is NaN, and one NaN pixel spreads through the
-  // whole bloom pyramid and blacks out the frame.
-  float square = pow(clamp(key, 0.0, 1.0), 12.0);
-  base += vec3(0.30, 0.45, 0.70) * square * 0.6;
+  // Sky fill. Hemispherical and cool, and the term ambient occlusion actually
+  // describes — a point deep in a socket can see very little sky.
+  float sky = 0.5 + 0.5 * n.y;
+  base += vec3(0.090, 0.160, 0.305) * sky * vOcc;
+
+  // Bounce, from below and dimmer. It keeps the underside of the jaw and the
+  // brow from going to flat black, which is what separates "in shadow" from
+  // "not drawn".
+  base += vec3(0.10, 0.16, 0.28) * max(-n.y, 0.0) * vOcc * 0.5;
+
+  // The floor the other two sit on, also occluded.
+  base += vec3(0.020, 0.040, 0.090) * vOcc;
+
+  // Squarely-facing sheen, and only where the key actually reaches. Clamped
+  // before the pow: two unit vectors can dot to 1.0000001, pow of a negative
+  // is NaN, and one NaN pixel spreads through the whole bloom pyramid and
+  // blacks out the frame.
+  float square = pow(clamp(key, 0.0, 1.0), 16.0);
+  base += vec3(0.35, 0.50, 0.78) * square * vShadow * 0.55;
 
   // Before the figure has formed, the bead still carries the card pixel it
   // came from. That is the promise of the whole sequence: these ARE the cards.
@@ -287,8 +341,23 @@ void main() {
   float seamGlow = smoothstep(1.0 - uMouthLevel * 0.55 - 0.08, 1.0, vSeam);
   colour += vec3(0.55, 0.72, 1.0) * seamGlow * uMouthLevel * vFormed;
 
-  // Two faint points of light, settling last.
-  colour += vec3(0.75, 0.88, 1.0) * vEye * uEyes * 1.4;
+  // Two points of light, settling last.
+  //
+  // Cubed, so only the very centre of the cluster lights. A linear falloff lit
+  // the whole 10 mm gather radius evenly and produced two flat pale discs —
+  // eyeballs with no pupil, which is why the figure looked startled rather
+  // than attentive. The surrounding sphere is darkened for the same reason: an
+  // eye reads as a bright point IN something dark, and the sclera was
+  // competing with the pupil.
+  // Cubed, so only the very centre of the cluster lights. A linear falloff lit
+  // the whole gather radius evenly and produced two flat pale discs.
+  //
+  // There is no darkening term here any more. Multiplying the whole cluster
+  // down painted a mask across both eyes on top of the sockets that were
+  // already dark, and the two merged into a band. The socket's own occlusion
+  // is the dark; this only has to supply the light in it.
+  float pupil = vEye * vEye * vEye;
+  colour += vec3(0.72, 0.86, 1.0) * pupil * uEyes * 1.25;
 
   fragColor = vec4(colour, 1.0);
 }

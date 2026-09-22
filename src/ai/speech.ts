@@ -1,6 +1,8 @@
 import { useAIStore } from '@/stores/useAIStore';
 import { audio } from '@/audio/AudioEngine';
 import { clamp01 } from '@/core/math/util';
+import { driveVoiceCharacter, restVoiceCharacter } from '@/audio/VoiceCharacter';
+import { applyVoiceProfile, countSyllables, splitClauses, type Clause } from './voiceProfile';
 
 /** Cross-browser SpeechRecognition, which is still vendor-prefixed. */
 type SR = {
@@ -132,6 +134,10 @@ export class Speaker {
   private raf = 0;
   private pulses: { at: number; duration: number; syllables: number }[] = [];
   private startedAt = 0;
+  private queue: Clause[] = [];
+  private cancelled = false;
+  private gapTimer = 0;
+  private onDone: (() => void) | undefined;
 
   get supported(): boolean {
     return typeof window !== 'undefined' && 'speechSynthesis' in window;
@@ -144,20 +150,33 @@ export class Speaker {
     }
     this.cancel();
 
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.02;
-    u.pitch = 0.94;
-    u.volume = 1;
-
-    const voice = pickVoice();
-    if (voice) u.voice = voice;
-
+    // The line is spoken as a SEQUENCE of clauses, not as one utterance.
+    // See `splitClauses` for why the pauses are the whole point.
+    this.queue = splitClauses(text);
+    this.cancelled = false;
+    this.onDone = onDone;
     this.pulses = [];
     this.startedAt = performance.now();
+    this.track();
+    this.speakNext();
+  }
+
+  /** Speak the next clause, then wait its beat before the one after it. */
+  private speakNext(): void {
+    if (this.cancelled) return;
+    const next = this.queue.shift();
+    if (!next) {
+      this.finish();
+      return;
+    }
+
+    const u = new SpeechSynthesisUtterance(next.text);
+    applyVoiceProfile(u);
+
 
     u.onboundary = (e) => {
       if (e.name && e.name !== 'word') return;
-      const word = text.slice(e.charIndex, e.charIndex + (e.charLength || 6));
+      const word = next.text.slice(e.charIndex, e.charIndex + (e.charLength || 6));
       this.pulses.push({
         at: performance.now(),
         duration: Math.max(90, word.length * 62),
@@ -167,32 +186,54 @@ export class Speaker {
 
     u.onstart = () => {
       useAIStore.getState().setStatus('speaking');
-      this.track();
     };
 
-    const finish = () => {
-      cancelAnimationFrame(this.raf);
-      useAIStore.getState().setSpeechLevel(0);
-      audio.duck(0);
-      if (useAIStore.getState().status === 'speaking') {
-        useAIStore.getState().setStatus('idle');
-      }
-      onDone?.();
+    // The gap AFTER this clause, before the next one starts. A browser will
+    // happily run two queued utterances together with no seam at all, so the
+    // pause has to be a real timer rather than punctuation in the string.
+    const advance = () => {
+      if (this.cancelled) return;
+      this.gapTimer = window.setTimeout(() => this.speakNext(), next.pauseMs);
     };
-    u.onend = finish;
-    u.onerror = finish;
+    u.onend = advance;
+    u.onerror = advance;
 
     this.utterance = u;
     window.speechSynthesis.speak(u);
   }
 
+  private finish(): void {
+    cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    useAIStore.getState().setSpeechLevel(0);
+    restVoiceCharacter();
+    audio.duck(0);
+    if (useAIStore.getState().status === 'speaking') {
+      useAIStore.getState().setStatus('idle');
+    }
+    const done = this.onDone;
+    this.onDone = undefined;
+    done?.();
+  }
+
   /** Stop mid-word. This is what makes interruption feel like interruption. */
   cancel(): void {
     if (!this.supported) return;
+    // Every clause still queued has to go too, or an interruption merely skips
+    // to the next sentence — which reads as being ignored, not interrupted.
+    this.cancelled = true;
+    this.queue = [];
+    if (this.gapTimer) {
+      clearTimeout(this.gapTimer);
+      this.gapTimer = 0;
+    }
     window.speechSynthesis.cancel();
     cancelAnimationFrame(this.raf);
+    this.raf = 0;
     this.pulses = [];
+    this.onDone = undefined;
     useAIStore.getState().setSpeechLevel(0);
+    restVoiceCharacter();
     audio.duck(0);
     this.utterance = null;
   }
@@ -224,33 +265,11 @@ export class Speaker {
     // Land it in the same range an analyser produces for the studio voice.
     const scaled = clamp01(level * 0.78);
     useAIStore.getState().setSpeechLevel(scaled);
+    // The same envelope drives the jaw, the ducking AND the machine layer, so
+    // all three are locked to each other by construction.
+    driveVoiceCharacter(scaled);
     audio.duck(scaled);
   };
-}
-
-function pickVoice(): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-  const preferred = [
-    'Google UK English Female',
-    'Samantha',
-    'Microsoft Aria Online (Natural) - English (United States)',
-    'Karen',
-  ];
-  for (const name of preferred) {
-    const found = voices.find((v) => v.name === name);
-    if (found) return found;
-  }
-  return voices.find((v) => v.lang.startsWith('en')) ?? voices[0];
-}
-
-function countSyllables(word: string): number {
-  const w = word.toLowerCase().replace(/[^a-z]/g, '');
-  if (!w) return 1;
-  const groups = w.match(/[aeiouy]+/g);
-  let n = groups ? groups.length : 1;
-  if (w.endsWith('e') && n > 1) n--;
-  return Math.max(1, Math.min(5, n));
 }
 
 export const speaker = new Speaker();

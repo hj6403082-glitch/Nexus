@@ -27,6 +27,10 @@ import { parseOllamaLine } from '../src/server/ai/ollama.ts';
 import { describeKeyProblem, parseGeminiLine } from '../src/server/ai/gemini.ts';
 import { decideProvider } from '../src/server/ai/provider.ts';
 import { VERBS, isVerb } from '../src/server/bridge/verbs.ts';
+import { splitClauses, pickVoice, type Clause } from '../src/ai/voiceProfile.ts';
+import { BUST_PARTS } from '../src/scene/human/anatomy.ts';
+import { sdBustCPU, sdMandibleCPU } from '../src/scene/human/sdf.ts';
+import { figureFacesCamera } from '../src/scene/human/placement.ts';
 
 let failures = 0;
 function check(name: string, fn: () => void) {
@@ -528,6 +532,90 @@ check('the ladder is ordinal: prefix beats initials beats boundary beats substri
   );
   // Initials.
   assert.equal(rank(items, 'vsc')[0].label, 'Visual Studio Code');
+});
+
+console.log('\nTHE FIGURE');
+
+check('the figure faces the camera', () => {
+  // The bust is authored facing +Z and the camera looks along +Z, so a
+  // placement that only translates shows the viewer the back of its head.
+  // That shipped once; it is an assertion now.
+  assert.ok(figureFacesCamera(), 'the nose is further from the camera than the occiput');
+});
+
+check('the mandible is a region, not a height', () => {
+  // The chest must not belong to the jaw. It did, because membership was
+  // "below the chin", and opening the mouth swung the whole torso.
+  const chin = sdMandibleCPU(0, 1.5215, 0.070);
+  const chest = sdMandibleCPU(0, 1.15, 0.05);
+  assert.ok(chin < 0.01, `the chin should be mandible mass, got ${chin.toFixed(3)}`);
+  assert.ok(chest > 0.2, `the chest must be far from the mandible, got ${chest.toFixed(3)}`);
+});
+
+check('the eye sockets are recesses, not bumps', () => {
+  // A point on the eye axis, at the depth the surrounding face reaches, must
+  // be OUTSIDE the body — that is what a socket means. Before the carve, the
+  // eye lights sat 50mm inside the skull where no baked point could reach.
+  const socketMouth = sdBustCPU(0.0395, 1.6065, 0.092);
+  const cheekAtSameDepth = sdBustCPU(0.0395, 1.560, 0.092);
+  assert.ok(
+    socketMouth > cheekAtSameDepth,
+    'the socket is not recessed relative to the cheek beside it',
+  );
+});
+
+check('no carved part is also mandible mass', () => {
+  // A carve removes mass and cannot define where mass is. The field generator
+  // throws on this, so the table must never contain one.
+  for (const part of BUST_PARTS) {
+    assert.ok(!(part.carve && part.jaw), `${part.name} is both carved and jaw`);
+  }
+});
+
+console.log('\nVOICE');
+
+check('a line is broken into clauses, longest pause at a full stop', () => {
+  const clauses = splitClauses('I am here. You are late, obviously; I waited.');
+  assert.ok(clauses.length >= 4, `expected several clauses, got ${clauses.length}`);
+  const full = clauses.find((c: Clause) => c.text.endsWith('.') && c.text.startsWith('I am'));
+  const comma = clauses.find((c: Clause) => c.text.endsWith(','));
+  assert.ok(full && comma, 'did not split at both a full stop and a comma');
+  assert.ok(
+    full.pauseMs > comma.pauseMs,
+    `a full stop must hold longer than a comma (${full.pauseMs} vs ${comma.pauseMs})`,
+  );
+});
+
+check('the last clause does not hold a pause', () => {
+  const clauses = splitClauses('Enough. Go.');
+  assert.equal(clauses[clauses.length - 1].pauseMs, 0, 'trailing silence after the last word');
+});
+
+check('a line with no punctuation is still spoken', () => {
+  const clauses = splitClauses('do it');
+  assert.equal(clauses.length, 1);
+  assert.equal(clauses[0].text, 'do it');
+});
+
+check('the deepest available voice is chosen over a bright one', () => {
+  const voices = [
+    { name: 'Google UK English Female', lang: 'en-GB' },
+    { name: 'Samantha', lang: 'en-US' },
+    { name: 'Daniel', lang: 'en-GB' },
+  ] as SpeechSynthesisVoice[];
+  assert.equal(pickVoice(voices)?.name, 'Daniel');
+});
+
+check('an unknown voice set still resolves to English', () => {
+  const voices = [
+    { name: 'Zosia', lang: 'pl-PL' },
+    { name: 'Some Male Voice', lang: 'en-AU' },
+  ] as SpeechSynthesisVoice[];
+  assert.equal(pickVoice(voices)?.name, 'Some Male Voice');
+});
+
+check('no voice at all is not a crash', () => {
+  assert.equal(pickVoice([]), null);
 });
 
 const run = async () => {

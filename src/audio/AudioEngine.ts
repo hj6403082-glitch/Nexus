@@ -127,6 +127,15 @@ export class AudioEngine {
    * metres out put the voice at half level; the distance is capped so the
    * direction is expressive and the level is not.
    */
+  /**
+   * Where the voice character layer connects. The spatial panner, so the
+   * machine layer is placed with the voice rather than sitting flat in the
+   * middle of the room while the voice moves to the figure's face.
+   */
+  voiceBus(): AudioNode | null {
+    return this.voiceNode();
+  }
+
   voiceNode(): PannerNode | null {
     const ctx = this.ctx;
     if (!ctx || !this.master) return null;

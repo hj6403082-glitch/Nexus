@@ -294,9 +294,22 @@ await until(
 await page.waitForTimeout(9000);
 const afterFloor = meanGreenOverRed(readPng(await page.screenshot({ clip: floorClip })));
 await page.screenshot({ path: `${SHOTS}/01f-market-grid.png` });
+/**
+ * Asserted as a RATIO and an absolute, not as a raw difference.
+ *
+ * The old form required the mean to rise by more than 1.5, which silently
+ * depended on how much of the clip rectangle the floor actually filled — so
+ * widening the camera's frustum from 46 to 54 degrees failed a feature that
+ * was working perfectly (0.50 → 1.73, still three and a half times greener).
+ *
+ * The claim the check is meant to make is "the floor stops being blue and
+ * starts being green", and that is what these two say: green must end up
+ * leading red outright, and must have at least doubled. Both are invariant to
+ * framing in a way a subtraction is not.
+ */
 check(
   'opening stocks converts the floor into a market grid',
-  afterFloor - beforeFloor > 1.5,
+  afterFloor > 1.2 && afterFloor > beforeFloor * 2,
   `mean green-over-red ${beforeFloor.toFixed(2)} → ${afterFloor.toFixed(2)}`,
 );
 

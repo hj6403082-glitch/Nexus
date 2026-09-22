@@ -4,10 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { EYES, JAW } from './anatomy';
-import { BUST_BOUNDS, BUST_SDF } from './sdf';
+import { BUST_BOUNDS, BUST_SDF, sdMandibleCPU } from './sdf';
+import { bakeLighting, type BakedLight } from './lighting';
+import { CORE, FIGURE_NORMAL_MATRIX, FIGURE_PLACEMENT } from './placement';
+import { measureSpread } from './spread';
 import { bakeSurface } from './Baker';
 import { selectPoisson } from './poisson';
-import { makeBeadMaterial, MAX_CARDS } from './beadMaterial';
+import { KEY_DIR, makeBeadMaterial, MAX_CARDS } from './beadMaterial';
 import { sampleCardFaces } from './sampleCards';
 import { TIER_BUDGET, useSystemStore } from '@/stores/useSystemStore';
 import { PHASE_BOUNDS, useTransformStore } from '@/stores/useTransformStore';
@@ -28,18 +31,6 @@ import { audio } from '@/audio/AudioEngine';
  * at its authored origin is standing on top of the camera. It has to be moved
  * out in front and dropped to eye level.
  */
-const FIGURE_PLACEMENT = (() => {
-  const m = new THREE.Matrix4();
-  // Head centre (bust-local y 1.588, z 0.078) lands at world (0, 0.55, 1.15).
-  m.makeTranslation(0, 0.46 - 1.588, 1.02 - 0.078);
-  return m;
-})();
-
-const FIGURE_NORMAL_MATRIX = new THREE.Matrix3().setFromMatrix4(FIGURE_PLACEMENT);
-
-/** The gathering point, in world space — in front of the camera, not on it. */
-const CORE = new THREE.Vector3(0, 0.46, 1.06);
-
 type BakeState = 'idle' | 'baking' | 'ready' | 'failed';
 
 /**
@@ -72,7 +63,13 @@ export function HumanForm() {
    */
   const frozenCount = useRef(0);
 
-  const figure = useRef<{ positions: Float32Array; normals: Float32Array; spacing: number } | null>(
+  const figure = useRef<{
+    positions: Float32Array;
+    normals: Float32Array;
+    spacing: number;
+    spread: Float32Array;
+    light: BakedLight;
+  } | null>(
     null,
   );
 
@@ -130,10 +127,46 @@ export function HumanForm() {
         }
 
         if (cancelled) return;
+
+        // Each bead measures its own neighbourhood, because the point set is
+        // not uniform: the head came out solid and the chest, several times
+        // the area, was 3% void. One radius cannot serve both.
+        const spreader = measureSpread(
+          selection.value.positions,
+          selection.value.positions.length / 3,
+          selection.value.spacing,
+        );
+        let spreadStep = spreader.next();
+        while (!spreadStep.done) {
+          if (cancelled) return;
+          await nextFrame();
+          spreadStep = spreader.next();
+        }
+        if (cancelled) return;
+
+        // The dark is what makes a face read, and it is only affordable
+        // because the figure does not deform: two floats per point, asked of
+        // the same field that produced the surface, held for its lifetime.
+        const lighter = bakeLighting(
+          selection.value.positions,
+          selection.value.normals,
+          selection.value.positions.length / 3,
+          KEY_DIR,
+        );
+        let lit = lighter.next();
+        while (!lit.done) {
+          if (cancelled) return;
+          await nextFrame();
+          lit = lighter.next();
+        }
+
+        if (cancelled) return;
         figure.current = {
           positions: selection.value.positions,
           normals: selection.value.normals,
           spacing: selection.value.spacing,
+          spread: spreadStep.value,
+          light: lit.value,
         };
         setBakeState('ready');
         useSystemStore
@@ -187,10 +220,6 @@ export function HumanForm() {
     const seam = new Float32Array(count);
     const eye = new Float32Array(count);
 
-    // The two points of light. A single point per eye is one bead among
-    // thirty thousand and is simply not visible; a small cluster reads as a
-    // point of light without becoming a feature.
-    const EYE_RADIUS = 0.016;
 
     for (let i = 0; i < count; i++) {
       const x = fig.positions[i * 3];
@@ -202,8 +231,13 @@ export function HumanForm() {
       // gathering rather than a cloud resolving all at once.
       stagger[i] = clamp01((BUST_BOUNDS.max[1] - y) / (BUST_BOUNDS.max[1] - BUST_BOUNDS.min[1]));
 
-      // Jaw membership, feathered so the hinge has no hard edge.
-      jawWeight[i] = clamp01((JAW.topY - y) / JAW.feather);
+      // Jaw membership is DISTANCE TO THE MANDIBLE, feathered so the hinge
+      // has no hard edge. It used to be "below this height", which is also
+      // true of the neck, the shoulders and the entire chest — so opening the
+      // mouth swung the whole torso about a line through the ears. Nothing
+      // caught it because a headless browser has no speech voices, so the
+      // mouth never opened in any test that took a screenshot.
+      jawWeight[i] = 1 - clamp01(sdMandibleCPU(x, y, z) / JAW.feather);
 
       // Distance to the lip seam → the thin line that lights when it speaks.
       const dy = Math.abs(y - JAW.seam.y);
@@ -214,7 +248,7 @@ export function HumanForm() {
 
       const dl = Math.hypot(x - EYES.left[0], y - EYES.left[1], z - EYES.left[2]);
       const dr = Math.hypot(x - EYES.right[0], y - EYES.right[1], z - EYES.right[2]);
-      eye[i] = clamp01(1 - Math.min(dl, dr) / EYE_RADIUS);
+      eye[i] = clamp01(1 - Math.min(dl, dr) / EYES.gather);
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
@@ -228,6 +262,9 @@ export function HumanForm() {
     geometry.setAttribute('aJawWeight', new THREE.BufferAttribute(jawWeight, 1));
     geometry.setAttribute('aSeam', new THREE.BufferAttribute(seam, 1));
     geometry.setAttribute('aEye', new THREE.BufferAttribute(eye, 1));
+    geometry.setAttribute('aSpread', new THREE.BufferAttribute(fig.spread, 1));
+    geometry.setAttribute('aOcclusion', new THREE.BufferAttribute(fig.light.occlusion, 1));
+    geometry.setAttribute('aShadow', new THREE.BufferAttribute(fig.light.shadow, 1));
     geometry.setDrawRange(0, count);
     // The bounding sphere cannot be derived from `position` (which is a dummy
     // buffer: every real position is computed in the vertex shader), so it is
@@ -235,14 +272,13 @@ export function HumanForm() {
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.4, 1), 8);
 
     /**
-     * The bead radius is derived from the spacing the selection ACHIEVED, not
-     * from a constant. 0.62 of the spacing as a radius means neighbouring
-     * beads overlap by roughly a quarter of their diameter: enough that the
-     * surface has no holes, little enough that each bead still resolves as its
-     * own dot rather than melting into plastic.
+     * The radius is now PER BEAD — see `spread.ts` — so this is only the
+     * quality dial on top of it. It used to carry the tier's `beadScale` as
+     * well, which double counted: a lower tier asks for fewer points, the
+     * selection reports the wider spacing that results, and the radius already
+     * grew to match.
      */
-    material.uniforms.uBeadSize.value =
-      (fig.spacing / 0.0042) * 0.62 * TIER_BUDGET[useSystemStore.getState().tier].beadScale;
+    material.uniforms.uBeadSize.value = 1.0;
   }, [phase, bakeState, material]);
 
   // Release the tier lock when the ring comes back, applying anything pending.
