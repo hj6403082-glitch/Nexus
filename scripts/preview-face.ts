@@ -18,6 +18,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { BUST_SDF } from '../src/scene/human/sdf.ts';
 import { EYES } from '../src/scene/human/anatomy.ts';
 import { FACE_MARKINGS_GLSL } from '../src/scene/human/faceMarkings.ts';
+import { SURFACE_DETAIL_GLSL } from '../src/scene/human/surfaceDetail.ts';
 import { KEY_DIR, FILL_DIR, RIM_DIR } from '../src/scene/human/lights.ts';
 
 const v3 = (v: readonly number[]) => `vec3(${v.map((n) => n.toFixed(5)).join(', ')})`;
@@ -28,12 +29,14 @@ const HTML = `<!doctype html>
 </head><body><canvas id="c"></canvas><script type="x-shader/x-fragment" id="fs">
 precision highp float;
 ${BUST_SDF}
+${SURFACE_DETAIL_GLSL}
 ${FACE_MARKINGS_GLSL}
 
 uniform vec2 uResolution;
 uniform float uTime;
 uniform vec3 uCamera;
 uniform float uYaw;
+uniform float uBlink;
 
 const vec3 KEY = ${v3(KEY_DIR)};
 const vec3 FILL = ${v3(FILL_DIR)};
@@ -41,7 +44,13 @@ const vec3 RIM = ${v3(RIM_DIR)};
 const vec3 EYE_L = ${v3(EYES.left)};
 const vec3 EYE_R = ${v3(EYES.right)};
 
-float sdPosed(vec3 p) { return sdBust(p); }
+float sdPosed(vec3 p) {
+  // The same two-degree downward tilt the app applies, so this previews the
+  // posture as well as the surface.
+  float head = smoothstep(1.46, 1.58, p.y);
+  p = rotateAbout(p, vec3(0.0, 1.44, 0.0), vec3(1.0, 0.0, 0.0), 0.036 * head);
+  return sdBust(p);
+}
 
 vec3 fieldNormal(vec3 p) {
   const float e = 0.0005;
@@ -105,6 +114,9 @@ void main() {
 
   // Metal, not skin — see SurfaceFigure.tsx for why. Kept character for
   // character with the app's shader so this previews the real thing.
+  float seam = panelSeams(p);
+  n = machined(p, n);
+
   vec3 refl = reflect(rd, n);
   vec3 fillDir = normalize(FILL);
   vec3 rimDir = normalize(RIM);
@@ -113,25 +125,42 @@ void main() {
                  smoothstep(-0.55, 0.85, refl.y));
   env += vec3(0.62, 0.78, 1.05) * pow(max(dot(refl, keyDir), 0.0), 52.0) * 2.6;
   env += vec3(0.10, 0.20, 0.44) * pow(max(dot(refl, rimDir), 0.0), 7.0) * 0.55;
-  env += vec3(0.05, 0.07, 0.12) * pow(max(dot(refl, fillDir), 0.0), 4.0) * 0.35;
+  env += vec3(0.06, 0.075, 0.115) * pow(max(dot(refl, fillDir), 0.0), 3.0) * 0.55;
 
-  vec3 albedo = vec3(0.17, 0.22, 0.31);
+  vec3 albedo = vec3(0.208, 0.222, 0.246);
   float fres = pow(clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0), 5.0);
   vec3 colour = mix(albedo, vec3(1.0), fres) * env * mix(0.35, 1.0, occ);
 
   float wrapped = pow(clamp(key * 0.90 + 0.10, 0.0, 1.0), 1.7);
   colour += albedo * wrapped * mix(0.05, 1.0, shade) * 0.30 * occ;
-  colour += albedo * max(dot(n, fillDir), 0.0) * 0.10 * occ;
+  colour += albedo * max(dot(n, fillDir), 0.0) * 0.16 * occ;
+
+  colour *= mix(1.0, 0.34, seam);
+  colour += vec3(0.50, 0.56, 0.68) * pow(seam, 3.0) * max(dot(n, keyDir), 0.0) * 0.55 * occ;
 
   vec3 halfVec = normalize(keyDir + viewDir);
   colour += vec3(0.85, 0.95, 1.15) * pow(clamp(dot(n, halfVec), 0.0, 1.0), 120.0) * shade * occ * 1.1;
 
   colour = faceMarkings(p, n, colour);
 
+  // Kept character for character with the app — see SurfaceFigure for why the
+  // eye is wide and warm now and why it blinks.
   float eye = min(length(p - EYE_L), length(p - EYE_R));
-  colour *= mix(1.0, 0.10, 1.0 - smoothstep(0.0020, 0.0088, eye));
-  colour += vec3(0.55, 0.78, 1.15) * (1.0 - smoothstep(0.0, 0.0021, eye)) * 1.35;
-  colour += vec3(0.08, 0.20, 0.48) * (1.0 - smoothstep(0.002, 0.0075, eye)) * 0.34;
+  float lidY = mix(1.6118, 1.5902, uBlink);
+  float lid = smoothstep(lidY - 0.0007, lidY + 0.0007, p.y);
+  float openEye = 1.0 - lid;
+
+  // Calmer than the first pass at widening them: wide AND bright reads as
+  // startled, which is its own kind of unsettling. Warm white rather than
+  // blue-white, because a cool light behind an eye is the colour of something
+  // powered rather than something present.
+  colour *= mix(1.0, 0.48, (1.0 - smoothstep(0.0024, 0.0098, eye)) * openEye);
+  colour += vec3(0.80, 0.82, 0.86) * (1.0 - smoothstep(0.0, 0.0028, eye)) * openEye * 0.78;
+  colour += vec3(0.30, 0.40, 0.56) * (1.0 - smoothstep(0.0026, 0.0092, eye)) * openEye * 0.30;
+
+  float lidEdge = (1.0 - smoothstep(0.0, 0.0016, abs(p.y - lidY)))
+                * (1.0 - smoothstep(0.004, 0.0125, eye));
+  colour += vec3(0.30, 0.34, 0.40) * lidEdge * 0.5;
 
   colour = pow(max(colour, vec3(0.0)), vec3(1.0 / 2.2));
   gl_FragColor = vec4(colour, 1.0);
@@ -165,6 +194,7 @@ gl.uniform2f(gl.getUniformLocation(prog, 'uResolution'), canvas.width, canvas.he
 gl.uniform1f(gl.getUniformLocation(prog, 'uTime'), 0);
 gl.uniform3f(gl.getUniformLocation(prog, 'uCamera'), 0, 0.02, 0.62);
 gl.uniform1f(gl.getUniformLocation(prog, 'uYaw'), +(params.get('yaw') || 0));
+gl.uniform1f(gl.getUniformLocation(prog, 'uBlink'), +(params.get('blink') || 0));
 gl.viewport(0, 0, canvas.width, canvas.height);
 gl.drawArrays(gl.TRIANGLES, 0, 3);
 gl.finish();

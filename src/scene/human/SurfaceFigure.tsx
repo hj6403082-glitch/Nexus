@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { BUST_SDF, BUST_BOUNDS } from './sdf';
 import { EYES, JAW } from './anatomy';
 import { FACE_MARKINGS_GLSL, MOUTH } from './faceMarkings';
+import { SURFACE_DETAIL_GLSL } from './surfaceDetail';
 import { FILL_DIR, KEY_DIR, RIM_DIR } from './lights';
 import { FIGURE_PLACEMENT } from './placement';
 import { useTransformStore } from '@/stores/useTransformStore';
@@ -80,6 +81,7 @@ export function SurfaceFigure() {
       uMouth: { value: 0 },
       uHeadYaw: { value: 0 },
       uBreath: { value: 0 },
+      uBlink: { value: 0 },
       /**
        * Neutral, now that the surface is a metal.
        *
@@ -123,6 +125,8 @@ export function SurfaceFigure() {
 
   const jaw = useRef(0);
   const yaw = useRef(0);
+  const nextBlink = useRef(2.5);
+  const blinkStart = useRef(-10);
 
   useFrame((state, rawDelta) => {
     const m = mesh.current;
@@ -168,6 +172,30 @@ export function SurfaceFigure() {
     yaw.current += (Math.sin(t * 0.17) * 0.05 - yaw.current) * Math.min(1, dt * 1.2);
     u.uHeadYaw.value = yaw.current;
     u.uBreath.value = Math.sin(t * 0.62);
+
+    /**
+     * THE BLINK.
+     *
+     * Scheduled rather than driven by a sine, because the shape matters: a
+     * blink is a fast close and a slightly slower open, not a smooth
+     * oscillation, and the gap between them is irregular. A perfectly
+     * periodic blink is uncanny in its own right — it reads as a mechanism
+     * keeping time rather than as a body doing something involuntary.
+     */
+    if (t >= nextBlink.current) {
+      blinkStart.current = t;
+      // Somewhere between three and seven seconds until the next one.
+      nextBlink.current = t + 3.0 + Math.random() * 4.0;
+    }
+    const since = t - blinkStart.current;
+    const CLOSE = 0.055;
+    const OPEN = 0.085;
+    u.uBlink.value =
+      since < CLOSE
+        ? since / CLOSE
+        : since < CLOSE + OPEN
+          ? 1 - (since - CLOSE) / OPEN
+          : 0;
   });
 
   const material = useMemo(
@@ -217,6 +245,7 @@ precision highp float;
 in vec3 vWorld;
 
 ${BUST_SDF}
+${SURFACE_DETAIL_GLSL}
 ${FACE_MARKINGS_GLSL}
 
 uniform mat4 uInverse;
@@ -235,6 +264,7 @@ uniform float uReveal;
 uniform float uMouth;
 uniform float uHeadYaw;
 uniform float uBreath;
+uniform float uBlink;
 uniform float uExposure;
 
 out vec4 fragColor;
@@ -250,9 +280,18 @@ out vec4 fragColor;
  * field smoothly into the skull instead of shearing it.
  */
 float sdPosed(vec3 p) {
-  // Head turn, about the neck, falling off below it.
+  /**
+   * Head turn, about the neck, falling off below it — plus a small permanent
+   * downward tilt.
+   *
+   * Two degrees. A head held exactly level, facing exactly forward, and not
+   * moving is the posture of something confronting you; the same head tipped a
+   * fraction down is attentive. It costs nothing and it is a surprising amount
+   * of the difference between being looked at and being stared at.
+   */
   float head = smoothstep(1.46, 1.58, p.y);
   p = rotateAbout(p, vec3(0.0, 1.44, 0.0), vec3(0.0, 1.0, 0.0), -uHeadYaw * head);
+  p = rotateAbout(p, vec3(0.0, 1.44, 0.0), vec3(1.0, 0.0, 0.0), 0.036 * head);
 
   // Breath, in the chest only.
   float chest = smoothstep(1.34, 1.14, p.y);
@@ -336,6 +375,14 @@ void main() {
   float shade = shadow(p, keyDir);
   float key = max(dot(n, keyDir), 0.0);
 
+  /**
+   * PLATING. See surfaceDetail.ts — a perfectly smooth blue glowing mass on
+   * black is the vocabulary of an apparition no matter what its BRDF is, and
+   * seams are the single most legible signal that a thing was manufactured.
+   */
+  float seam = panelSeams(p);
+  n = machined(p, n);
+
   vec3 refl = reflect(dir, n);
   vec3 fillDir = normalize(uFillDir);
   vec3 rimDir = normalize(uRimDir);
@@ -348,11 +395,16 @@ void main() {
   );
   env += vec3(0.62, 0.78, 1.05) * pow(max(dot(refl, keyDir), 0.0), 52.0) * 2.6;
   env += vec3(0.10, 0.20, 0.44) * pow(max(dot(refl, rimDir), 0.0), 7.0) * 0.55;
-  env += vec3(0.05, 0.07, 0.12) * pow(max(dot(refl, fillDir), 0.0), 4.0) * 0.35;
+  env += vec3(0.06, 0.075, 0.115) * pow(max(dot(refl, fillDir), 0.0), 3.0) * 0.55;
 
   // Dark blue steel. This is the colour the SPECULAR is tinted by, which is
   // what makes a metal look like a particular metal.
-  vec3 albedo = vec3(0.17, 0.22, 0.31);
+  // GRAPHITE, not cornflower. The albedo was a saturated blue, which on a blue
+  // backdrop with a blue key reads as one luminous blue thing — the exact
+  // palette every ghost in every film is painted in. Nearly neutral, with only
+  // enough blue left to belong to the room, and the warmth comes from the
+  // seams catching light rather than from the body.
+  vec3 albedo = vec3(0.208, 0.222, 0.246);
 
   // Fresnel. Every material goes mirror-like at a grazing angle; on a metal it
   // is the term that draws the edge of the form, which is why this does the
@@ -364,7 +416,12 @@ void main() {
   // hole. A tenth of what a dielectric would get.
   float wrapped = pow(clamp(key * 0.90 + 0.10, 0.0, 1.0), 1.7);
   colour += albedo * wrapped * mix(0.05, 1.0, shade) * 0.30 * occ;
-  colour += albedo * max(dot(n, fillDir), 0.0) * 0.10 * occ;
+  colour += albedo * max(dot(n, fillDir), 0.0) * 0.16 * occ;
+
+  // The seam itself: a dark groove, and a lip that catches the key. An edge
+  // is not a line drawn on a surface, it is a place where the surface turns.
+  colour *= mix(1.0, 0.34, seam);
+  colour += vec3(0.50, 0.56, 0.68) * pow(seam, 3.0) * max(dot(n, keyDir), 0.0) * 0.55 * occ;
 
   // A tight glint on top, for the polish.
   vec3 halfVec = normalize(keyDir + viewDir);
@@ -377,26 +434,50 @@ void main() {
           * (1.0 - wrapped) * occ * 0.45;
 
   /**
-   * THE EYES, analytic — and DIM.
+   * THE EYES — AND THE BLINK.
    *
-   * At 1.7 they were headlights: two blown-out white discs that took the whole
-   * face with them through the bloom pass. An eye is read from contrast, and
-   * the sockets around these are already dark, so the light has almost no work
-   * to do. The iris is darkened FIRST and only a small pupil is lit, which is
-   * the arrangement that reads as a gaze rather than as two lamps.
-   */
-  /**
-   * A DARK eye with a bright iris, not a pale eye with a bright dot.
+   * Two things were making this frightening rather than merely synthetic.
    *
-   * On a metal bust there is no sclera to be white — the whole head is one
-   * material — so the eye is read entirely from the lamp inside it. Sinking
-   * the surrounding sphere to near black and putting all of the light in a
-   * 2 mm core is what turns two pale ovals into a gaze.
+   * The first is that the eye was a hot pinprick at the bottom of a black
+   * well. Small bright points in dark hollows are the exact construction used
+   * for every predator, skull and possessed thing ever drawn; the fact that
+   * the geometry underneath is a perfectly reasonable eye socket does not
+   * matter, because the viewer is reading a contrast pattern, not an anatomy.
+   * So the iris is wider and softer now, the socket around it is lifted well
+   * off black, and the core is warmer — cold blue-white in a dark recess is
+   * the specific combination that reads as a thing looking AT you rather than
+   * a thing that can see.
+   *
+   * The second is that it never blinked. A face that holds a completely
+   * motionless stare is uncanny no matter how well modelled it is, because
+   * eyes that do not blink belong to something dead or something hunting. A
+   * blink is cheap — a lid edge sweeping down over the socket and back — and
+   * it is the single strongest signal available that the thing is ALIVE and
+   * unbothered by you. uBlink runs 0 to 1 to 0 in about 130 ms, every few
+   * seconds, on an irregular interval, because a perfectly periodic blink is
+   * its own kind of wrong.
    */
   float eye = min(length(p - uEyeL), length(p - uEyeR));
-  colour *= mix(1.0, 0.10, 1.0 - smoothstep(0.0020, 0.0088, eye));
-  colour += vec3(0.55, 0.78, 1.15) * (1.0 - smoothstep(0.0, 0.0021, eye)) * 1.35;
-  colour += vec3(0.08, 0.20, 0.48) * (1.0 - smoothstep(0.002, 0.0075, eye)) * 0.34;
+
+  // The lid: a hard edge that travels from the top of the socket to the
+  // bottom. Everything above the edge is covered.
+  float lidY = mix(1.6118, 1.5902, uBlink);
+  float lid = smoothstep(lidY - 0.0007, lidY + 0.0007, p.y);
+  float openEye = 1.0 - lid;
+
+  // Calmer than the first pass at widening them: wide AND bright reads as
+  // startled, which is its own kind of unsettling. Warm white rather than
+  // blue-white, because a cool light behind an eye is the colour of something
+  // powered rather than something present.
+  colour *= mix(1.0, 0.48, (1.0 - smoothstep(0.0024, 0.0098, eye)) * openEye);
+  colour += vec3(0.80, 0.82, 0.86) * (1.0 - smoothstep(0.0, 0.0028, eye)) * openEye * 0.78;
+  colour += vec3(0.30, 0.40, 0.56) * (1.0 - smoothstep(0.0026, 0.0092, eye)) * openEye * 0.30;
+
+  // The lid edge itself catches a little light, so the blink is visible as a
+  // movement rather than as the eye simply switching off.
+  float lidEdge = (1.0 - smoothstep(0.0, 0.0016, abs(p.y - lidY)))
+                * (1.0 - smoothstep(0.004, 0.0125, eye));
+  colour += vec3(0.30, 0.34, 0.40) * lidEdge * 0.5;
 
   // The drawn line work: mouth, nostrils, brow crease.
   colour = faceMarkings(p, n, colour);

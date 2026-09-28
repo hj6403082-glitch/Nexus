@@ -27,8 +27,17 @@
 export const MOUTH = {
   y: 1.5545,
   halfWidth: 0.0246,
-  /** How far the corners rise relative to the centre. */
-  arc: 0.0016,
+  /**
+   * How far the corners rise relative to the centre.
+   *
+   * Nearly doubled, and this is the cheapest thing in the whole figure. A
+   * mouth drawn dead level reads as grim no matter what the rest of the face
+   * is doing — a straight line across a jaw is the universal shorthand for
+   * hostility, and at 1.6 mm of rise it was still close enough to level to
+   * land there. Three millimetres is not a smile; it is the difference
+   * between a face that is not smiling and a face that is refusing to.
+   */
+  arc: 0.0031,
 } as const;
 
 /**
@@ -60,14 +69,17 @@ vec3 faceMarkings(vec3 p, vec3 n, vec3 colour) {
   // has to hug the top of the socket — held 7 mm clear of it, as it first was,
   // two straight dashes float above the eyes and read as pencilled-on brows.
   // Tapered at both ends, because a crease that stops abruptly is a mark.
+  // The INNER end is raised, not lowered. A crease that drops toward the nose
+  // is the shape of a frown, and the face was wearing one by accident.
   float bx = clamp(abs(p.x) / 0.0465, 0.0, 1.0);
-  float browY = 1.6112 - 0.0038 * bx * bx;
+  float browY = 1.6118 + 0.0016 * bx - 0.0042 * bx * bx;
   float browTaper = smoothstep(0.10, 0.34, bx) * (1.0 - smoothstep(0.66, 1.0, bx));
   float brow = (1.0 - smoothstep(0.0010, 0.0038, abs(p.y - browY))) * browTaper * front;
 
   colour *= mix(1.0, 0.16, mouth);
   colour *= mix(1.0, 0.22, nose);
-  colour *= mix(1.0, 0.52, brow);
+  // Softened from 0.52. A hard dark bar over each eye is a scowl drawn on.
+  colour *= mix(1.0, 0.68, brow);
   return colour;
 }
 `;
