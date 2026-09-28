@@ -15,6 +15,7 @@ import { selectPoisson } from './poisson';
 import { KEY_DIR, makeBeadMaterial, MAX_CARDS } from './beadMaterial';
 import { sampleCardFaces } from './sampleCards';
 import { TIER_BUDGET, useSystemStore } from '@/stores/useSystemStore';
+import { MAX_TIMELINE_STEP } from '@/core/constants/motion';
 import { PHASE_BOUNDS, useTransformStore } from '@/stores/useTransformStore';
 import { useAIStore } from '@/stores/useAIStore';
 import { useGestureStore } from '@/stores/useGestureStore';
@@ -383,9 +384,19 @@ export function HumanForm() {
      */
     const surfaceReady = figure.current !== null;
     if (surfaceReady || transform.t < PHASE_BOUNDS.command * 0.985) {
-      transform.tick(dt);
+      /**
+       * The transformation is a TIMELINE, so it gets real elapsed time.
+       *
+       * `dt` above is clamped to a twentieth of a second so a stalled frame
+       * cannot fling a spring across the room. Applied here that clamp meant
+       * the fourteen-second sequence advanced by 0.2 s of its own time per real
+       * second on a software renderer — six minutes to reach the figure, with
+       * nothing on screen but beads in flight. A bounded sequence has no
+       * stability problem to protect; see MAX_TIMELINE_STEP.
+       */
+      transform.tick(Math.min(rawDelta, MAX_TIMELINE_STEP));
     }
-    transform.tickHand(dt);
+    transform.tickHand(Math.min(rawDelta, MAX_TIMELINE_STEP));
 
     const p = points.current;
     if (!p) return;

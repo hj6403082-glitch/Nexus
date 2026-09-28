@@ -33,6 +33,7 @@ import { sdBustCPU, sdMandibleCPU } from '../src/scene/human/sdf.ts';
 import { EYES } from '../src/scene/human/anatomy.ts';
 import { buildWireframe, mirrorAcrossMidline } from '../src/scene/human/wireframe.ts';
 import { respond } from '../src/ai/localBrain.ts';
+import { MAX_TIMELINE_STEP, PRESENT, PRESENT_TOTAL } from '../src/core/constants/motion.ts';
 import {
   FIGURE_EYES,
   PORTRAIT_DISTANCE,
@@ -728,6 +729,56 @@ check('an unrecognised question still gets an honest answer', () => {
   // It says what it is and what it cannot do, rather than inventing a sonnet.
   assert.ok(/on-device/i.test(spoken), `the brain did not declare itself: ${spoken}`);
   assert.ok(/connect a model/i.test(spoken), 'the answer did not say how to fix it');
+});
+
+check('a bounded timeline finishes in its own duration at any frame rate', () => {
+  /**
+   * The clocks used to be advanced by the same clamped delta the SPRINGS use —
+   * a twentieth of a second, so a stalled frame cannot fling a spring across
+   * the room. A spring needs that; a timeline does not. A bounded sequence has
+   * no stability problem to protect, and all the clamp does to one is make it
+   * run slow in exact proportion to how slow the machine already is.
+   *
+   * At four frames a second the 6.7 s presentation took over half a minute, so
+   * clicking a card read as doing nothing, and the fourteen-second
+   * transformation took six minutes with nothing on screen but beads in
+   * flight. Both were reported as the application being broken, and both were
+   * this one line.
+   *
+   * The check is the arithmetic that was wrong: play a clock at a given frame
+   * rate and see how long it really takes.
+   */
+  const play = (fps: number, cap: number): number => {
+    const frame = 1 / fps;
+    let clock = 0;
+    let real = 0;
+    // A generous ceiling; anything that hits it has failed anyway.
+    while (clock < PRESENT_TOTAL && real < 600) {
+      clock += Math.min(frame, cap);
+      real += frame;
+    }
+    return real;
+  };
+
+  // The old clamp, at four frames a second: five times too long.
+  const slow = play(4, 1 / 20);
+  assert.ok(
+    slow > PRESENT_TOTAL * 4,
+    `the old clamp should have been ruinous here, took ${slow.toFixed(1)}s`,
+  );
+
+  // The timeline cap, at the same four frames a second: real time.
+  for (const fps of [4, 10, 30, 60, 144]) {
+    const took = play(fps, MAX_TIMELINE_STEP);
+    assert.ok(
+      Math.abs(took - PRESENT_TOTAL) < PRESENT_TOTAL * 0.1,
+      `at ${fps}fps the presentation took ${took.toFixed(2)}s, not ${PRESENT_TOTAL.toFixed(2)}s`,
+    );
+  }
+
+  // And the cap still exists, so a backgrounded tab returning cannot skip the
+  // whole sequence in a single frame.
+  assert.ok(MAX_TIMELINE_STEP < PRESENT.TARGETING, 'one frame can skip a whole beat');
 });
 
 check('the portrait station frames the head', () => {

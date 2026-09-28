@@ -2,7 +2,7 @@
 
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { PRESENT } from '@/core/constants/motion';
+import { MAX_TIMELINE_STEP, PRESENT } from '@/core/constants/motion';
 import { useCarouselStore } from '@/stores/useCarouselStore';
 import { audio } from '@/audio/AudioEngine';
 
@@ -21,7 +21,10 @@ export function PresentationClock() {
   const elapsed = useRef(0);
 
   useFrame((_, rawDelta) => {
-    const dt = Math.min(rawDelta, 1 / 20);
+    // A TIMELINE, not a spring — see MAX_TIMELINE_STEP. Clamping this to a
+    // twentieth of a second made a 6.7 s presentation take over half a minute
+    // on a slow renderer, which reads as a click that did nothing.
+    const dt = Math.min(rawDelta, MAX_TIMELINE_STEP);
     const s = useCarouselStore.getState();
     if (s.presentPhase === 'none') {
       elapsed.current = 0;

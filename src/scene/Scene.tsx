@@ -201,6 +201,17 @@ function Probe() {
       hovered: useCarouselStore.getState().hovered,
       dragging: useCarouselStore.getState().dragging,
       open: useCarouselStore.getState().open,
+      /**
+       * The presentation clock's own state, not just its outcome.
+       *
+       * `open` is committed at the END of the clock, so when a click failed to
+       * open a card there was no way to tell from outside whether the press
+       * had never been read as a click at all, or had been read correctly and
+       * then lost somewhere in the three beats. Those are different bugs in
+       * different files.
+       */
+      pending: useCarouselStore.getState().pending,
+      presentPhase: useCarouselStore.getState().presentPhase,
       focusPresence: useCarouselStore.getState().focusPresence,
       ring: {
         radius: useCarouselStore.getState().radius,

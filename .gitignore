@@ -15,3 +15,4 @@ src/generated
 .capture.mjs
 .shots
 .static-check.mjs
+.click-probe.mjs

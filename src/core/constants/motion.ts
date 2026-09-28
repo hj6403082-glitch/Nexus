@@ -61,6 +61,25 @@ export const BOOT = {
  * motion stops, not at the moment it stops, so the last beat is dead time on
  * purpose.
  */
+/**
+ * HOW LONG A FRAME MAY COUNT FOR, ON A TIMELINE.
+ *
+ * Springs are integrated with a delta clamped to a twentieth of a second, so a
+ * stalled frame cannot fling one across the room. Applied to a TIMELINE that
+ * clamp is a bug, and a subtle one: a bounded sequence has no stability
+ * problem to protect, so all the clamp does is make it run slow. At four
+ * frames a second — a software renderer, an old laptop, a phone under load —
+ * a clock advanced by a twentieth of a second per frame covers 0.2 s of its
+ * own time per real second, and a 6.7 s presentation takes over half a minute.
+ * Clicking a card appeared to do nothing.
+ *
+ * So timelines get the REAL elapsed time, capped only high enough to stop a
+ * backgrounded tab returning and skipping the whole sequence in one frame.
+ * A quarter of a second is four frames' grace at the target rate and still
+ * finishes a sequence in its specified duration at any rate above 4 fps.
+ */
+export const MAX_TIMELINE_STEP = 0.25;
+
 export const PRESENT = {
   TARGETING: BEAT * 1.1,
   APPROACH: BEAT * 2.4,
