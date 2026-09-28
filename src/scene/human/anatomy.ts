@@ -236,9 +236,21 @@ export const BUST_PARTS: Part[] = [
     blend: 0.030,
   },
   ...mirrored('deltoid', {
-    // 480 mm across the shoulders, not 546. The old pair stood 90 mm proud of
-    // a 272 mm chest, which reads as shoulder pads rather than as deltoids.
-    prim: { kind: 'capsule', a: [0.140, 1.330, 0], b: [0.172, 1.245, 0], ra: 0.068, rb: 0.060 },
+    /**
+     * THE ARM RUNS OFF THE BOTTOM OF THE FRAME. IT DOES NOT END.
+     *
+     * This was a stub: a capsule from the shoulder down to y = 1.245 and then
+     * nothing. A capsule that stops is a hemisphere, so each shoulder finished
+     * in a ball standing 50 mm proud of a torso that then narrowed below it —
+     * two balloons tied to the sides of the chest, and the single worst thing
+     * on the figure.
+     *
+     * The torso already knew this: it runs to y = 0.62 and off the frame,
+     * because a chest that ENDS is a bust on a plinth. The same is true of an
+     * arm. So the deltoid is now an upper arm, tapering gently the way one
+     * does and leaving the picture rather than closing over.
+     */
+    prim: { kind: 'capsule', a: [0.138, 1.332, 0], b: [0.170, 0.62, 0.004], ra: 0.062, rb: 0.052 },
     blend: 0.034,
   }),
   ...mirrored('clavicle', {
@@ -262,8 +274,12 @@ export const BUST_PARTS: Part[] = [
     blend: 0.075,
   }),
   ...mirrored('pec', {
-    prim: { kind: 'ellipsoid', p: [0.054, 1.245, 0.046], r: [0.076, 0.056, 0.048] },
-    blend: 0.036,
+    // Flatter in Z than it was. At 48 mm of forward relief each pec stood off
+    // the torso as a dome, and a pair of domes on a chest reads as a breast,
+    // not as a muscle. A pectoral is a broad shallow plane; 32 mm gives the
+    // plane the key can rake across without giving it a horizon.
+    prim: { kind: 'ellipsoid', p: [0.054, 1.245, 0.040], r: [0.078, 0.058, 0.032] },
+    blend: 0.040,
   }),
 
   // ---- carved ---------------------------------------------------------------
@@ -280,12 +296,18 @@ export const BUST_PARTS: Part[] = [
   // The mouth is not carved. It is DRAWN — see `faceMarkings.ts`. Five
   // geometric versions of this seam each broke differently, because a carve
   // has to reach a surface that five other primitives are jointly deciding.
-  {
-    name: 'sternumGroove',
-    prim: { kind: 'capsule', a: [0, 1.300, 0.082], b: [0, 1.170, 0.086], ra: 0.016, rb: 0.022 },
-    blend: 0.030,
-    carve: true,
-  },
+  /**
+   * THE STERNUM IS NOT CARVED EITHER.
+   *
+   * It was, and it did what the file says every carve beside a convex form
+   * does: it raised a rim around itself. Between two pec domes that rim became
+   * a ridge running down the middle of the chest — a mound where a valley was
+   * meant to be, which is the opposite of the intent.
+   *
+   * The two torso capsules already meet in a shallow valley at the midline,
+   * and the pecs sit either side of it. That valley is the sternum. Nothing
+   * needs to be dug for it, and digging for it was making it worse.
+   */
 
   // ---- the eyes themselves --------------------------------------------------
   // Added back AFTER the sockets are carved, so each sits in its own recess.

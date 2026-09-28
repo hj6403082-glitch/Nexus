@@ -22,7 +22,11 @@ import { sdBustCPU, BUST_BOUNDS } from '../src/scene/human/sdf.ts';
 import { selectPoisson } from '../src/scene/human/poisson.ts';
 import { buildWireframe, mirrorAcrossMidline } from '../src/scene/human/wireframe.ts';
 import { EYES } from '../src/scene/human/anatomy.ts';
-import { FIGURE_PLACEMENT } from '../src/scene/human/placement.ts';
+import {
+  FIGURE_EYES,
+  FIGURE_PLACEMENT,
+  PORTRAIT_DISTANCE,
+} from '../src/scene/human/placement.ts';
 import {
   SHARED_VERTEX,
   NODE_VERTEX,
@@ -216,6 +220,11 @@ const M = {
   norm(v){const l=Math.hypot(v[0],v[1],v[2])||1;return [v[0]/l,v[1]/l,v[2]/l];}
 };
 const PLACEMENT = ${JSON.stringify(Array.from(FIGURE_PLACEMENT.elements))};
+// The rig's portrait station, not the Canvas camera prop — the rig overrides
+// that prop on its first frame, so a preview built from it looks from
+// somewhere the application never looks from.
+const EYES = ${JSON.stringify(FIGURE_EYES.toArray())};
+const PORTRAIT = ${PORTRAIT_DISTANCE};
 const params = new URLSearchParams(location.search);
 const W = +(params.get('w') || 900), H = +(params.get('h') || 900);
 const canvas = document.getElementById('c');
@@ -286,11 +295,9 @@ const placeNormal = M.normal(placement);
 
 // The application's camera: fov 54 at (0, 0.12, -0.35), looking at the face.
 const yaw = +(params.get('yaw') || 0);
-const target0 = PLACEMENT[14] - 0.0855;
-// The application's camera sits at z = -0.35; this is its real distance.
-const dist = +(params.get('dist') || (target0 + 0.35));
-const target = [0, 0.15, target0];
-const camera = [target[0] - Math.sin(yaw) * dist, 0.12, target[2] - Math.cos(yaw) * dist];
+const dist = +(params.get('dist') || PORTRAIT);
+const target = EYES.slice();
+const camera = [target[0] - Math.sin(yaw) * dist, target[1], target[2] - Math.cos(yaw) * dist];
 const view = M.lookAt(camera, target, [0, 1, 0]);
 const proj = M.perspective(54 * Math.PI / 180, W / H, 0.05, 80);
 const normalMatrix = M.normal(view);

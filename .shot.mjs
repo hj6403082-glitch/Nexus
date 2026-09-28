@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+import { pathToFileURL } from 'node:url';
+const [file, out, query] = process.argv.slice(2);
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=swiftshader','--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 900, height: 900 } });
+p.on('pageerror', e => console.log('[error]', e.message));
+await p.goto(pathToFileURL(file).href + (query ? '?' + query : ''));
+await p.waitForFunction('window.__drawn || window.__error', { timeout: 120000 }).catch(()=>{});
+console.log('error:', await p.evaluate('window.__error || null'));
+await p.screenshot({ path: out });
+await b.close();
