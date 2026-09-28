@@ -86,7 +86,7 @@ export function SurfaceFigure() {
        * of the app a stop and a half hotter and washed back out to the pale
        * mass this was all meant to fix. This is that stop and a half.
        */
-      uExposure: { value: 0.72 },
+      uExposure: { value: 0.52 },
     }),
     [],
   );
@@ -385,6 +385,18 @@ void main() {
   vec4 clip = uProj * uView * vec4(world, 1.0);
   gl_FragDepth = clamp((clip.z / clip.w) * 0.5 + 0.5, 0.0, 1.0);
 
-  fragColor = vec4(colour * uExposure, uReveal);
+  /**
+   * A gamma above 1 before the exposure, not just a multiply.
+   *
+   * Scaling alone darkens everything equally and the figure stays the same
+   * flat porcelain, only dimmer. Raising to a power pulls the MIDTONES down
+   * much harder than the highlights, which widens the gap between the lit
+   * planes and the shadow — and that gap is the whole difference between a
+   * sculpture and a ghost. The bloom and filmic grade this is composited
+   * through then lift the result back, which is why the numbers here look
+   * darker than what ends up on screen.
+   */
+  colour = pow(max(colour, vec3(0.0)), vec3(1.30)) * uExposure;
+  fragColor = vec4(colour, uReveal);
 }
 `;

@@ -31,7 +31,7 @@ export const FIGURE_PLACEMENT = (() => {
    * `figureFacesCamera()` below is the assertion that keeps it turned around.
    */
   const m = new THREE.Matrix4().makeRotationY(Math.PI);
-  // The eye plane (bust-local y 1.6045, z 0.0855) lands at world (0, 0.16, 0.28).
+  // The eye plane (bust-local y 1.6045, z 0.0855) lands at world (0, 0.15, 0.245).
   //
   // Close, and level with the camera rather than above it. Further out the head
   // was a sixth of the frame and the chest was most of the rest — a whole
@@ -39,7 +39,7 @@ export const FIGURE_PLACEMENT = (() => {
   // does not change the head-to-shoulder ratio, but it does put the eyes on the
   // camera's own axis and run the chest off the bottom edge, which is the
   // difference between a portrait and an inventory photograph.
-  m.premultiply(new THREE.Matrix4().makeTranslation(0, 0.16 - 1.6045, 0.28 + 0.0855));
+  m.premultiply(new THREE.Matrix4().makeTranslation(0, 0.15 - 1.6045, 0.245 + 0.0855));
   return m;
 })();
 

@@ -121,13 +121,13 @@ void main() {
 const WARPED_FIELD = /* glsl */ `
   float w = fbm(dir * 2.1 + flow);
   vec3 warp = vec3(w, w * 0.87 + 0.31, w * 0.63 + 0.77);
-  float field = fbm(dir * 3.6 + warp * 2.2 + flow * 1.7);
+  float field = fbm(dir * 5.4 + warp * 2.4 + flow * 1.7);
 `;
 
 const PLAIN_FIELD = /* glsl */ `
   // No warp on a weak machine: one fbm call instead of two, and the structure
   // is rounder for it. A backdrop that costs the frame rate is not a backdrop.
-  float field = fbm(dir * 3.2 + flow * 1.7);
+  float field = fbm(dir * 4.6 + flow * 1.7);
 `;
 
 const fragment = (octaves: number, warp: boolean) => /* glsl */ `
