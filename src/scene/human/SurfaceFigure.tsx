@@ -81,16 +81,21 @@ export function SurfaceFigure() {
       uHeadYaw: { value: 0 },
       uBreath: { value: 0 },
       /**
-       * The figure is composited into a pipeline with bloom and a filmic grade
-       * on the end of it, and the preview is not, so it needs holding down a
-       * little. Much less than it did: this was 0.52 when the surface was a
-       * pale diffuse mass and every stop had to come out of the exposure.
-       * A metal is dark by construction — its albedo is 0.17/0.22/0.31 and
-       * almost all of its brightness is a specular that only appears where the
-       * form turns into a light. Taking more out here now just crushes the
-       * highlights that are doing the work.
+       * Neutral, now that the surface is a metal.
+       *
+       * This started at 0.52 with a gamma on top of it, because a pale diffuse
+       * mass came out of the app's bloom and grade a stop and a half too hot
+       * and every one of those stops had to be taken out here. A metal is dark
+       * by construction — its albedo is 0.17/0.22/0.31 and nearly all of its
+       * brightness is a specular that only appears where the form turns into a
+       * light — so the same correction applied to it just dimmed the
+       * highlights that were doing the work and put the murk back.
+       *
+       * Left in place rather than deleted: it is the one dial for matching the
+       * figure to a post chain, and the next change to bloom or the grade will
+       * want it.
        */
-      uExposure: { value: 0.88 },
+      uExposure: { value: 1.0 },
     }),
     [],
   );
@@ -406,18 +411,10 @@ void main() {
   vec4 clip = uProj * uView * vec4(world, 1.0);
   gl_FragDepth = clamp((clip.z / clip.w) * 0.5 + 0.5, 0.0, 1.0);
 
-  /**
-   * A gamma above 1 before the exposure, not just a multiply.
-   *
-   * Scaling alone darkens everything equally and the figure stays the same
-   * flat porcelain, only dimmer. Raising to a power pulls the MIDTONES down
-   * much harder than the highlights, which widens the gap between the lit
-   * planes and the shadow — and that gap is the whole difference between a
-   * sculpture and a ghost. The bloom and filmic grade this is composited
-   * through then lift the result back, which is why the numbers here look
-   * darker than what ends up on screen.
-   */
-  colour = pow(max(colour, vec3(0.0)), vec3(1.08)) * uExposure;
+  // The contrast gamma that used to sit here is gone. It existed to widen the
+  // gap between lit and shadow on a flat diffuse surface; a metal's specular
+  // already supplies that gap, and squaring it up only crushed the highlights.
+  colour = max(colour, vec3(0.0)) * uExposure;
   fragColor = vec4(colour, uReveal);
 }
 `;
