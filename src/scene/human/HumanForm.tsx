@@ -8,7 +8,7 @@ import { BUST_BOUNDS, BUST_SDF, sdMandibleCPU } from './sdf';
 import { bakeLighting, type BakedLight } from './lighting';
 import { CORE, FIGURE_NORMAL_MATRIX, FIGURE_PLACEMENT } from './placement';
 import { measureSpread } from './spread';
-import { buildWireframe } from './wireframe';
+import { buildWireframe, mirrorAcrossMidline } from './wireframe';
 import { WireFigure, type FigureSurface } from './WireFigure';
 import { bakeSurface } from './Baker';
 import { selectPoisson } from './poisson';
@@ -180,13 +180,43 @@ export function HumanForm() {
           light: lit.value,
         };
 
-        // And the network between them. Built from the same points the beads
-        // fly to, so the figure that assembles IS the figure that stays.
-        const wiring = buildWireframe(
+        /**
+         * And the network between them — on a COARSER, MIRRORED subset.
+         *
+         * Coarser because the bead count is chosen so thirty thousand spheres
+         * can close into a solid figure, which puts them four millimetres
+         * apart; a mesh at four millimetres seen from forty centimetres is
+         * finer than the pixel grid, so the lines merge into a wash and the
+         * figure reads as a dim solid rather than as a network. Running the
+         * same elimination again keeps the Poisson property at a spacing where
+         * the individual triangles are visible.
+         *
+         * Mirrored because a random elimination gives the two halves of the
+         * face different points, and at this density that asymmetry is the
+         * most legible thing on it — see `mirrorAcrossMidline`.
+         */
+        const netting = selectPoisson(
           selection.value.positions,
+          selection.value.normals,
           selection.value.positions.length / 3,
-          selection.value.spacing,
+          Math.min(9000, selection.value.positions.length / 3),
+          16000,
         );
+        let netStep = netting.next();
+        while (!netStep.done) {
+          if (cancelled) return;
+          await nextFrame();
+          netStep = netting.next();
+        }
+        if (cancelled) return;
+
+        const net = mirrorAcrossMidline(
+          netStep.value.positions,
+          netStep.value.normals,
+          netStep.value.positions.length / 3,
+        );
+
+        const wiring = buildWireframe(net.positions, net.count, netStep.value.spacing);
         let wireStep = wiring.next();
         while (!wireStep.done) {
           if (cancelled) return;
@@ -196,9 +226,9 @@ export function HumanForm() {
         if (cancelled) return;
 
         setSurface({
-          positions: selection.value.positions,
-          normals: selection.value.normals,
-          spacing: selection.value.spacing,
+          positions: net.positions,
+          normals: net.normals,
+          spacing: netStep.value.spacing,
           wire: wireStep.value,
         });
         setBakeState('ready');

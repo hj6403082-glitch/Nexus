@@ -157,3 +157,55 @@ export function* buildWireframe(
 
   return { edges: edges.subarray(0, edgeCount * 2), edgeCount };
 }
+
+/**
+ * MAKE THE POINT SET SYMMETRIC.
+ *
+ * The selection is a random elimination, so the left and right halves of the
+ * face get different points, and at network density that difference is the
+ * most legible thing on it: one eye ends up with five nodes in its socket and
+ * the other with three, one cheek carries a bright edge the other does not.
+ * The face reads as damaged rather than as sparse — which is exactly the
+ * complaint the network was built to answer.
+ *
+ * So one half is chosen and the other is its reflection. The mesh is then
+ * symmetric by construction and the eye stops reading asymmetry as injury.
+ * Points sitting on the midline are kept once and pinned to x = 0, or they
+ * would be duplicated on top of themselves and the seam would be twice as
+ * bright as the rest.
+ */
+export function mirrorAcrossMidline(
+  positions: Float32Array,
+  normals: Float32Array,
+  count: number,
+): { positions: Float32Array; normals: Float32Array; count: number } {
+  // Half the mean spacing: wide enough to catch the points the elimination put
+  // on the midline, narrow enough not to flatten the ones beside it onto it.
+  const SEAM = 0.0018;
+
+  const outP: number[] = [];
+  const outN: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const x = positions[i * 3];
+    const y = positions[i * 3 + 1];
+    const z = positions[i * 3 + 2];
+    const nx = normals[i * 3];
+    const ny = normals[i * 3 + 1];
+    const nz = normals[i * 3 + 2];
+
+    if (Math.abs(x) <= SEAM) {
+      outP.push(0, y, z);
+      outN.push(0, ny, nz);
+      continue;
+    }
+    if (x < 0) continue;
+    outP.push(x, y, z, -x, y, z);
+    outN.push(nx, ny, nz, -nx, ny, nz);
+  }
+
+  return {
+    positions: new Float32Array(outP),
+    normals: new Float32Array(outN),
+    count: outP.length / 3,
+  };
+}

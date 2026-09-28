@@ -11,3 +11,5 @@ out
 .next-static
 src/generated
 .face-preview
+.wire-preview
+.capture.mjs

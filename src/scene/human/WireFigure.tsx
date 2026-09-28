@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { EYES } from './anatomy';
 import { FIGURE_PLACEMENT } from './placement';
 import type { Wireframe } from './wireframe';
+import { LINE_FRAGMENT, NODE_FRAGMENT, NODE_VERTEX, SHARED_VERTEX } from './wireShaders';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { useAIStore } from '@/stores/useAIStore';
 
@@ -92,7 +93,7 @@ export function WireFigure({ surface }: { surface: FigureSurface }) {
       const z = surface.positions[i * 3 + 2];
       const dl = Math.hypot(x - EYES.left[0], y - EYES.left[1], z - EYES.left[2]);
       const dr = Math.hypot(x - EYES.right[0], y - EYES.right[1], z - EYES.right[2]);
-      eye[i] = Math.max(0, 1 - Math.min(dl, dr) / 0.016);
+      eye[i] = Math.max(0, 1 - Math.min(dl, dr) / 0.030);
     }
     nodes.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
     nodes.setAttribute('aEye', new THREE.BufferAttribute(eye, 1));
@@ -191,180 +192,3 @@ export function WireFigure({ surface }: { surface: FigureSurface }) {
     </group>
   );
 }
-
-/**
- * Shared by both passes: place the point, and work out how much of the
- * silhouette it is on.
- */
-const SHARED_VERTEX = /* glsl */ `
-precision highp float;
-
-in vec3 aNormal;
-in float aSeed;
-in float aEye;
-
-uniform mat4 uPlacement;
-uniform mat3 uNormalMatrix;
-uniform float uTime;
-uniform float uReveal;
-uniform float uLevel;
-
-out float vSilhouette;
-out float vDepth;
-out float vKey;
-out float vSeed;
-out float vEye;
-
-void main() {
-  vec4 world = uPlacement * vec4(position, 1.0);
-  vec3 n = normalize(uNormalMatrix * aNormal);
-
-  vec4 mv = modelViewMatrix * world;
-  vec3 toEye = normalize(-mv.xyz);
-  vec3 nView = normalize(normalMatrix * n);
-
-  // 1 on the contour, 0 where the surface faces the camera squarely. This is
-  // the term that draws the profile, the brow and the jaw — the bright curves
-  // that separate a head from a tangle of triangles.
-  vSilhouette = pow(1.0 - abs(dot(nView, toEye)), 2.4);
-
-  // Nearer is brighter. Without this the far side of the skull competes with
-  // the face and the whole figure flattens.
-  vDepth = clamp(1.0 - (-mv.z - 0.18) / 0.62, 0.0, 1.0);
-
-  vKey = max(dot(n, normalize(vec3(-0.82, 0.50, 0.14))), 0.0);
-  vSeed = aSeed;
-  vEye = aEye;
-
-  gl_Position = projectionMatrix * mv;
-}
-`;
-
-/**
- * The nodes. Same placement and same silhouette term as the lines, plus a
- * screen-space size that falls off with distance so the far side of the head
- * does not produce dots the same size as the near side.
- */
-const NODE_VERTEX = /* glsl */ `
-precision highp float;
-
-in vec3 aNormal;
-in float aSeed;
-in float aEye;
-
-uniform mat4 uPlacement;
-uniform mat3 uNormalMatrix;
-uniform float uTime;
-uniform float uReveal;
-uniform float uLevel;
-uniform float uViewportHeight;
-
-out float vSilhouette;
-out float vDepth;
-out float vKey;
-out float vSeed;
-out float vEye;
-
-void main() {
-  vec4 world = uPlacement * vec4(position, 1.0);
-  vec3 n = normalize(uNormalMatrix * aNormal);
-
-  vec4 mv = modelViewMatrix * world;
-  vec3 toEye = normalize(-mv.xyz);
-  vec3 nView = normalize(normalMatrix * n);
-
-  vSilhouette = pow(1.0 - abs(dot(nView, toEye)), 2.4);
-  vDepth = clamp(1.0 - (-mv.z - 0.18) / 0.62, 0.0, 1.0);
-  vKey = max(dot(n, normalize(vec3(-0.82, 0.50, 0.14))), 0.0);
-  vSeed = aSeed;
-  vEye = aEye;
-
-  // A fixed WORLD size, projected — so the dots keep their scale on the head
-  // rather than staying a constant number of pixels as the figure moves.
-  float radius = 0.0016 + 0.0022 * aEye;
-  gl_PointSize = clamp(
-    radius * 2.0 * projectionMatrix[1][1] * (uViewportHeight * 0.5) / max(-mv.z, 0.05),
-    1.0,
-    14.0
-  );
-  gl_Position = projectionMatrix * mv;
-}
-`;
-
-const LINE_FRAGMENT = /* glsl */ `
-precision highp float;
-
-in float vSilhouette;
-in float vDepth;
-in float vKey;
-in float vSeed;
-in float vEye;
-
-uniform vec3 uLineColour;
-uniform vec3 uEdgeColour;
-uniform float uReveal;
-uniform float uTime;
-uniform float uLevel;
-
-out vec4 fragColor;
-
-void main() {
-  // The body of the mesh, dim and cool.
-  vec3 colour = uLineColour * (0.20 + 0.34 * vKey);
-
-  // And the contour, which is where nearly all of the drawing happens.
-  colour += uEdgeColour * vSilhouette * 1.55;
-
-  // A slow travelling brightening, so the network reads as powered rather than
-  // printed. Irregular rate, so it never settles into a pulse.
-  float pulse = 0.5 + 0.5 * sin(vSeed * 23.7 + uTime * 1.35);
-  colour *= 0.80 + 0.26 * pulse;
-
-  // It brightens when it speaks.
-  colour *= 1.0 + uLevel * 0.55;
-
-  float alpha = (0.16 + vSilhouette * 0.80) * vDepth * uReveal;
-  fragColor = vec4(colour * vDepth, alpha);
-}
-`;
-
-const NODE_FRAGMENT = /* glsl */ `
-precision highp float;
-
-in float vSilhouette;
-in float vDepth;
-in float vKey;
-in float vSeed;
-in float vEye;
-
-uniform vec3 uNodeColour;
-uniform float uReveal;
-uniform float uTime;
-uniform float uLevel;
-
-out vec4 fragColor;
-
-void main() {
-  // Round, and soft at the rim. A square node reads as a rendering artefact.
-  vec2 c = gl_PointCoord * 2.0 - 1.0;
-  float r = dot(c, c);
-  if (r > 1.0) discard;
-  float core = 1.0 - smoothstep(0.0, 1.0, r);
-
-  // Nodes twinkle individually. A third of them are noticeably brighter at any
-  // moment, which is what gives the network its scattered-starfield quality
-  // instead of looking like a regular grid of identical dots.
-  float twinkle = 0.5 + 0.5 * sin(vSeed * 61.3 + uTime * 2.1);
-  float bright = 0.34 + 0.52 * twinkle + 0.55 * vSilhouette;
-
-  vec3 colour = uNodeColour * bright * (0.5 + 0.6 * vKey);
-
-  // The eyes are the one place the network concentrates into something solid.
-  colour += uNodeColour * vEye * 2.6;
-
-  colour *= 1.0 + uLevel * 0.7;
-
-  float alpha = core * (0.30 + 0.55 * twinkle + vEye) * vDepth * uReveal;
-  fragColor = vec4(colour * vDepth, clamp(alpha, 0.0, 1.0));
-}
-`;

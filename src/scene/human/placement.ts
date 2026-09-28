@@ -31,22 +31,38 @@ export const FIGURE_PLACEMENT = (() => {
    * `figureFacesCamera()` below is the assertion that keeps it turned around.
    */
   const m = new THREE.Matrix4().makeRotationY(Math.PI);
-  // The eye plane (bust-local y 1.6045, z 0.0855) lands at world (0, 0.15, 0.245).
-  //
-  // Close, and level with the camera rather than above it. Further out the head
-  // was a sixth of the frame and the chest was most of the rest — a whole
-  // figure seen from across a room, not something addressing you. Moving it in
-  // does not change the head-to-shoulder ratio, but it does put the eyes on the
-  // camera's own axis and run the chest off the bottom edge, which is the
-  // difference between a portrait and an inventory photograph.
-  m.premultiply(new THREE.Matrix4().makeTranslation(0, 0.15 - 1.6045, 0.245 + 0.0855));
+  /**
+   * The eye plane (bust-local y 1.6045, z 0.0855) lands at world (0, 0.15, 0.07).
+   *
+   * Close, and level with the camera rather than above it. Further out the head
+   * was a sixth of the frame and the chest was most of the rest — a whole
+   * figure seen from across a room, not something addressing you. Moving it in
+   * does not change the head-to-shoulder ratio, but it does put the eyes on the
+   * camera's own axis and run the chest off the bottom edge, which is the
+   * difference between a portrait and an inventory photograph.
+   *
+   * At 0.42 m from the camera at a 54 degree field of view, the frame is
+   * 0.43 m tall and the head is 0.21 m of it — very nearly half. That is the
+   * framing of the thing this is meant to look like. The previous 0.60 m put
+   * the head at under a third and gave the remaining two thirds to a chest
+   * that carries no information.
+   */
+  m.premultiply(new THREE.Matrix4().makeTranslation(0, 0.15 - 1.6045, 0.07 + 0.0855));
   return m;
 })();
 
 export const FIGURE_NORMAL_MATRIX = new THREE.Matrix3().setFromMatrix4(FIGURE_PLACEMENT);
 
-/** The gathering point, in world space — in front of the camera, not on it. */
-export const CORE = new THREE.Vector3(0, 0.18, 0.40);
+/**
+ * The gathering point, in world space — in front of the camera, not on it.
+ *
+ * It sits where the HEAD will be. The beads collapse here and then open out
+ * into the figure, so a core behind the figure's own face means the cloud
+ * gathers behind the thing it is about to become and every particle has to
+ * come forward past it. When the figure moved in to portrait framing this was
+ * left at 0.24 and ended up a hand's breadth behind the back of the skull.
+ */
+export const CORE = new THREE.Vector3(0, 0.15, 0.09);
 
 /**
  * The figure's nose must end up NEARER the camera than the back of its skull.

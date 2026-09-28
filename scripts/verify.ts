@@ -31,7 +31,7 @@ import { splitClauses, pickVoice, type Clause } from '../src/ai/voiceProfile.ts'
 import { BUST_PARTS } from '../src/scene/human/anatomy.ts';
 import { sdBustCPU, sdMandibleCPU } from '../src/scene/human/sdf.ts';
 import { EYES } from '../src/scene/human/anatomy.ts';
-import { buildWireframe } from '../src/scene/human/wireframe.ts';
+import { buildWireframe, mirrorAcrossMidline } from '../src/scene/human/wireframe.ts';
 import { figureFacesCamera } from '../src/scene/human/placement.ts';
 
 let failures = 0;
@@ -623,6 +623,64 @@ check('no carved part is also mandible mass', () => {
   // throws on this, so the table must never contain one.
   for (const part of BUST_PARTS) {
     assert.ok(!(part.carve && part.jaw), `${part.name} is both carved and jaw`);
+  }
+});
+
+check('the network is symmetric about the midline', () => {
+  /**
+   * A random elimination gives the two halves of the face different points,
+   * and at network density that asymmetry is the most legible thing on it: one
+   * eye socket with five nodes and the other with three reads as damage, not
+   * as sparseness. The mirror is what stops that, and it is invisible in a
+   * screenshot until it is wrong.
+   */
+  const positions = new Float32Array([
+    0.05, 1.6, 0.0,
+    -0.04, 1.5, 0.01,
+    0.0009, 1.4, 0.02,
+    0.03, 1.3, -0.01,
+  ]);
+  const normals = new Float32Array([
+    1, 0, 0,
+    -1, 0, 0,
+    0.2, 0.9, 0,
+    0.6, 0.8, 0,
+  ]);
+  const m = mirrorAcrossMidline(positions, normals, 4);
+
+  // The one point on the midline is kept once and pinned; the two on the
+  // positive side become four. The negative-side point is dropped, because its
+  // reflection is already there.
+  assert.equal(m.count, 5, 'the mirror did not produce one seam point and two pairs');
+
+  for (let i = 0; i < m.count; i++) {
+    const x = m.positions[i * 3];
+    const y = m.positions[i * 3 + 1];
+    const z = m.positions[i * 3 + 2];
+    let twin = -1;
+    for (let j = 0; j < m.count; j++) {
+      if (
+        Math.abs(m.positions[j * 3] + x) < 1e-6 &&
+        Math.abs(m.positions[j * 3 + 1] - y) < 1e-6 &&
+        Math.abs(m.positions[j * 3 + 2] - z) < 1e-6
+      ) {
+        twin = j;
+        break;
+      }
+    }
+    assert.ok(twin >= 0, `the point at x=${x} has no reflection`);
+    // And the reflection's normal is reflected too, or the mirrored half is
+    // lit as though it faced the other way.
+    assert.ok(
+      Math.abs(m.normals[twin * 3] + m.normals[i * 3]) < 1e-6,
+      'a reflected point kept its original normal',
+    );
+  }
+
+  // Nothing straddles the seam.
+  for (let i = 0; i < m.count; i++) {
+    const x = m.positions[i * 3];
+    assert.ok(Math.abs(x) > 1e-9 || x === 0, 'a seam point was not pinned to zero');
   }
 });
 
