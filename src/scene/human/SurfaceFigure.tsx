@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BUST_SDF, BUST_BOUNDS } from './sdf';
@@ -177,6 +177,14 @@ export function SurfaceFigure() {
       }),
     [uniforms, tier],
   );
+
+  /**
+   * A ShaderMaterial holds a compiled GPU program, and this one is rebuilt
+   * whenever the tier changes because the step count is compiled into it. On a
+   * machine whose frame rate is moving, the monitor can walk the tier up and
+   * down repeatedly — each step stranding another program on the GPU.
+   */
+  useEffect(() => () => material.dispose(), [material]);
 
   return (
     <mesh ref={mesh} position={centre} material={material} visible={false} frustumCulled={false}>
