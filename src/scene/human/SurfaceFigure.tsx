@@ -82,11 +82,15 @@ export function SurfaceFigure() {
       uBreath: { value: 0 },
       /**
        * The figure is composited into a pipeline with bloom and a filmic grade
-       * on the end of it, and the preview is not. Lit identically it came out
-       * of the app a stop and a half hotter and washed back out to the pale
-       * mass this was all meant to fix. This is that stop and a half.
+       * on the end of it, and the preview is not, so it needs holding down a
+       * little. Much less than it did: this was 0.52 when the surface was a
+       * pale diffuse mass and every stop had to come out of the exposure.
+       * A metal is dark by construction — its albedo is 0.17/0.22/0.31 and
+       * almost all of its brightness is a specular that only appears where the
+       * form turns into a light. Taking more out here now just crushes the
+       * highlights that are doing the work.
        */
-      uExposure: { value: 0.52 },
+      uExposure: { value: 0.88 },
     }),
     [],
   );
@@ -327,38 +331,39 @@ void main() {
   float shade = shadow(p, keyDir);
   float key = max(dot(n, keyDir), 0.0);
 
-  /**
-   * A PORTRAIT SETUP: key, fill, rim.
-   *
-   * One light and an ambient term is what a debug view looks like. Three is
-   * what a face looks like, and the roles are not interchangeable — the key
-   * carves the form, the fill keeps the shadow side readable without
-   * flattening it, and the rim separates the silhouette from the background so
-   * the head does not dissolve into the room behind it.
-   *
-   * The rim is the one Phase 7 forbade, and it was right to: on additive
-   * particles a rim term summed along every silhouette and produced a bright
-   * outline around an empty shape. On an opaque surface with a real normal it
-   * is the oldest trick in portrait lighting and it does the opposite — it
-   * gives the edge a defined thickness. Kept tight and cool so it reads as
-   * light falling on an edge, not as a glow leaking out of one.
-   */
+  vec3 refl = reflect(dir, n);
+  vec3 fillDir = normalize(uFillDir);
+  vec3 rimDir = normalize(uRimDir);
+
+  // The room, as seen by a mirror.
+  vec3 env = mix(
+    vec3(0.008, 0.013, 0.026),
+    vec3(0.070, 0.105, 0.190),
+    smoothstep(-0.55, 0.85, refl.y)
+  );
+  env += vec3(0.62, 0.78, 1.05) * pow(max(dot(refl, keyDir), 0.0), 52.0) * 2.6;
+  env += vec3(0.10, 0.20, 0.44) * pow(max(dot(refl, rimDir), 0.0), 7.0) * 0.55;
+  env += vec3(0.05, 0.07, 0.12) * pow(max(dot(refl, fillDir), 0.0), 4.0) * 0.35;
+
+  // Dark blue steel. This is the colour the SPECULAR is tinted by, which is
+  // what makes a metal look like a particular metal.
+  vec3 albedo = vec3(0.17, 0.22, 0.31);
+
+  // Fresnel. Every material goes mirror-like at a grazing angle; on a metal it
+  // is the term that draws the edge of the form, which is why this does the
+  // job the old rim light was hired for without the rim light's flatness.
+  float fres = pow(clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0), 5.0);
+  vec3 colour = mix(albedo, vec3(1.0), fres) * env * mix(0.35, 1.0, occ);
+
+  // The little diffuse a real metal has, so the shadow side is form and not a
+  // hole. A tenth of what a dielectric would get.
   float wrapped = pow(clamp(key * 0.90 + 0.10, 0.0, 1.0), 1.7);
-  vec3 colour = vec3(0.56, 0.76, 1.05) * wrapped * mix(0.04, 1.0, shade);
+  colour += albedo * wrapped * mix(0.05, 1.0, shade) * 0.30 * occ;
+  colour += albedo * max(dot(n, fillDir), 0.0) * 0.10 * occ;
 
-  float fill = max(dot(n, normalize(uFillDir)), 0.0);
-  colour += vec3(0.055, 0.085, 0.165) * fill * occ;
-
-  float rim = pow(clamp(dot(n, normalize(uRimDir)), 0.0, 1.0), 2.6);
-  colour += vec3(0.20, 0.34, 0.62) * rim * occ * 0.55;
-
-  // Sky ambient, occluded — the term that puts dark INTO the sockets.
-  colour += vec3(0.020, 0.034, 0.078) * (0.5 + 0.5 * n.y) * occ;
-  colour += vec3(0.005, 0.009, 0.024) * occ;
-
-  // Tight specular. Clay has no highlight; anything sculpted or machined does.
+  // A tight glint on top, for the polish.
   vec3 halfVec = normalize(keyDir + viewDir);
-  colour += vec3(0.75, 0.88, 1.12) * pow(clamp(dot(n, halfVec), 0.0, 1.0), 54.0) * shade * occ * 0.8;
+  colour += vec3(0.85, 0.95, 1.15) * pow(clamp(dot(n, halfVec), 0.0, 1.0), 120.0) * shade * occ * 1.1;
 
   // The charge: a band travelling up the body, brightest where the key does
   // not reach, so it lights the half of the figure that is otherwise only dark.
@@ -375,10 +380,18 @@ void main() {
    * to do. The iris is darkened FIRST and only a small pupil is lit, which is
    * the arrangement that reads as a gaze rather than as two lamps.
    */
+  /**
+   * A DARK eye with a bright iris, not a pale eye with a bright dot.
+   *
+   * On a metal bust there is no sclera to be white — the whole head is one
+   * material — so the eye is read entirely from the lamp inside it. Sinking
+   * the surrounding sphere to near black and putting all of the light in a
+   * 2 mm core is what turns two pale ovals into a gaze.
+   */
   float eye = min(length(p - uEyeL), length(p - uEyeR));
-  colour *= mix(1.0, 0.28, 1.0 - smoothstep(0.0028, 0.0090, eye));
-  colour += vec3(0.62, 0.80, 1.10) * (1.0 - smoothstep(0.0, 0.0030, eye)) * 0.80;
-  colour += vec3(0.10, 0.22, 0.50) * (1.0 - smoothstep(0.003, 0.0115, eye)) * 0.20;
+  colour *= mix(1.0, 0.10, 1.0 - smoothstep(0.0020, 0.0088, eye));
+  colour += vec3(0.55, 0.78, 1.15) * (1.0 - smoothstep(0.0, 0.0021, eye)) * 1.35;
+  colour += vec3(0.08, 0.20, 0.48) * (1.0 - smoothstep(0.002, 0.0075, eye)) * 0.34;
 
   // The drawn line work: mouth, nostrils, brow crease.
   colour = faceMarkings(p, n, colour);
@@ -404,7 +417,7 @@ void main() {
    * through then lift the result back, which is why the numbers here look
    * darker than what ends up on screen.
    */
-  colour = pow(max(colour, vec3(0.0)), vec3(1.30)) * uExposure;
+  colour = pow(max(colour, vec3(0.0)), vec3(1.08)) * uExposure;
   fragColor = vec4(colour, uReveal);
 }
 `;

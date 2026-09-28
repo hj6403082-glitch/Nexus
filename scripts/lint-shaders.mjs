@@ -29,7 +29,17 @@ function* walk(dir) {
 
 const offences = [];
 
-for (const file of walk('src')) {
+/**
+ * `scripts/` as well as `src/`.
+ *
+ * The face preview emits a shader too, and it went down to exactly the bug
+ * this file exists to catch — a backtick inside a GLSL comment, which ends the
+ * template literal and turns the rest of the program into syntax errors. It
+ * was outside the scan because the scan only looked at `src`, which is a
+ * statement about where the code happened to live rather than about where
+ * shaders are written.
+ */
+for (const file of [...walk('src'), ...walk('scripts')]) {
   const text = readFileSync(file, 'utf8');
   // Walk template literals, tracking `${}` nesting well enough for our shaders
   // (which never nest a template inside an interpolation).

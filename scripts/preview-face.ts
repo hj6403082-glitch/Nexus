@@ -103,21 +103,35 @@ void main() {
   float shade = shadow(p, keyDir);
   float key = max(dot(n, keyDir), 0.0);
 
+  // Metal, not skin — see SurfaceFigure.tsx for why. Kept character for
+  // character with the app's shader so this previews the real thing.
+  vec3 refl = reflect(rd, n);
+  vec3 fillDir = normalize(FILL);
+  vec3 rimDir = normalize(RIM);
+
+  vec3 env = mix(vec3(0.008, 0.013, 0.026), vec3(0.070, 0.105, 0.190),
+                 smoothstep(-0.55, 0.85, refl.y));
+  env += vec3(0.62, 0.78, 1.05) * pow(max(dot(refl, keyDir), 0.0), 52.0) * 2.6;
+  env += vec3(0.10, 0.20, 0.44) * pow(max(dot(refl, rimDir), 0.0), 7.0) * 0.55;
+  env += vec3(0.05, 0.07, 0.12) * pow(max(dot(refl, fillDir), 0.0), 4.0) * 0.35;
+
+  vec3 albedo = vec3(0.17, 0.22, 0.31);
+  float fres = pow(clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0), 5.0);
+  vec3 colour = mix(albedo, vec3(1.0), fres) * env * mix(0.35, 1.0, occ);
+
   float wrapped = pow(clamp(key * 0.90 + 0.10, 0.0, 1.0), 1.7);
-  vec3 colour = vec3(0.56, 0.76, 1.05) * wrapped * mix(0.04, 1.0, shade);
-  colour += vec3(0.055, 0.085, 0.165) * max(dot(n, normalize(FILL)), 0.0) * occ;
-  colour += vec3(0.20, 0.34, 0.62) * pow(clamp(dot(n, normalize(RIM)), 0.0, 1.0), 2.6) * occ * 0.55;
-  colour += vec3(0.020, 0.034, 0.078) * (0.5 + 0.5 * n.y) * occ;
-  colour += vec3(0.005, 0.009, 0.024) * occ;
+  colour += albedo * wrapped * mix(0.05, 1.0, shade) * 0.30 * occ;
+  colour += albedo * max(dot(n, fillDir), 0.0) * 0.10 * occ;
+
   vec3 halfVec = normalize(keyDir + viewDir);
-  colour += vec3(0.75, 0.88, 1.12) * pow(clamp(dot(n, halfVec), 0.0, 1.0), 54.0) * shade * occ * 0.8;
+  colour += vec3(0.85, 0.95, 1.15) * pow(clamp(dot(n, halfVec), 0.0, 1.0), 120.0) * shade * occ * 1.1;
 
   colour = faceMarkings(p, n, colour);
 
   float eye = min(length(p - EYE_L), length(p - EYE_R));
-  colour *= mix(1.0, 0.28, 1.0 - smoothstep(0.0028, 0.0090, eye));
-  colour += vec3(0.62, 0.80, 1.10) * (1.0 - smoothstep(0.0, 0.0030, eye)) * 0.80;
-  colour += vec3(0.10, 0.22, 0.50) * (1.0 - smoothstep(0.003, 0.0115, eye)) * 0.20;
+  colour *= mix(1.0, 0.10, 1.0 - smoothstep(0.0020, 0.0088, eye));
+  colour += vec3(0.55, 0.78, 1.15) * (1.0 - smoothstep(0.0, 0.0021, eye)) * 1.35;
+  colour += vec3(0.08, 0.20, 0.48) * (1.0 - smoothstep(0.002, 0.0075, eye)) * 0.34;
 
   colour = pow(max(colour, vec3(0.0)), vec3(1.0 / 2.2));
   gl_FragColor = vec4(colour, 1.0);
