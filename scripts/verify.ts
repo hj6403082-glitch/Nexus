@@ -31,7 +31,7 @@ import { splitClauses, pickVoice, type Clause } from '../src/ai/voiceProfile.ts'
 import { BUST_PARTS } from '../src/scene/human/anatomy.ts';
 import { sdBustCPU, sdMandibleCPU } from '../src/scene/human/sdf.ts';
 import { EYES } from '../src/scene/human/anatomy.ts';
-import { MARCH_STEPS, surfaceEnabled } from '../src/scene/human/surfaceQuality.ts';
+import { marchSteps, surfaceEnabled } from '../src/scene/human/surfaceQuality.ts';
 import { figureFacesCamera } from '../src/scene/human/placement.ts';
 
 let failures = 0;
@@ -626,26 +626,31 @@ check('no carved part is also mandible mass', () => {
   }
 });
 
-check('a tier that cannot march still shows a figure', () => {
+check('every tier draws the surface, none falls back to beads', () => {
   /**
-   * The beads retire only when the surface will replace them.
+   * This was a feedback loop, and the worst kind: the march is the most
+   * expensive thing in the scene, so running it drove the tier down, which
+   * switched the march off, which let the frame rate recover, which raised the
+   * tier, which switched it back on. The figure flipped between a smooth
+   * surface and a cloud of disconnected dots every few seconds.
    *
-   * These were two separate expressions of the same intent, and they
-   * disagreed: tier 0 refuses to march, but the beads handed over anyway, so a
-   * weak machine reaching the humanoid phase was shown an empty room. It is
-   * one function now, and this asserts that every tier ends up with something
-   * drawn.
+   * Any quality dial that changes WHAT is drawn rather than HOW WELL can
+   * oscillate like that. This asserts the dial is now the second kind.
    */
   for (const tier of [0, 1, 2, 3]) {
-    const marches = MARCH_STEPS[tier as 0 | 1 | 2 | 3] > 0;
-    assert.equal(
-      surfaceEnabled(tier),
-      marches,
-      `tier ${tier}: the beads and the surface disagree about who is drawing`,
+    assert.ok(surfaceEnabled(), `tier ${tier} must still draw the surface`);
+    assert.ok(
+      marchSteps(tier) >= 24,
+      `tier ${tier} marches ${marchSteps(tier)} steps, below the 24 the silhouette needs`,
     );
   }
-  assert.equal(surfaceEnabled(0), false, 'tier 0 must keep the beads');
-  assert.ok(surfaceEnabled(3), 'the top tier must draw the surface');
+  // And more tier buys more steps, monotonically.
+  for (const tier of [1, 2, 3]) {
+    assert.ok(
+      marchSteps(tier) > marchSteps(tier - 1),
+      `tier ${tier} should march further than tier ${tier - 1}`,
+    );
+  }
 });
 
 console.log('\nVOICE');

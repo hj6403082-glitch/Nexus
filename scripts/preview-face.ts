@@ -117,35 +117,37 @@ void main() {
   float seam = panelSeams(p);
   n = machined(p, n);
 
-  vec3 refl = reflect(rd, n);
-  vec3 fillDir = normalize(FILL);
-  vec3 rimDir = normalize(RIM);
+  // The hologram. Kept character for character with the app — see
+  // SurfaceFigure for why the figure stopped being a solid object.
+  float fres = pow(clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0), 2.1);
 
-  vec3 env = mix(vec3(0.008, 0.013, 0.026), vec3(0.070, 0.105, 0.190),
-                 smoothstep(-0.55, 0.85, refl.y));
-  env += vec3(0.62, 0.78, 1.05) * pow(max(dot(refl, keyDir), 0.0), 52.0) * 2.6;
-  env += vec3(0.10, 0.20, 0.44) * pow(max(dot(refl, rimDir), 0.0), 7.0) * 0.55;
-  env += vec3(0.06, 0.075, 0.115) * pow(max(dot(refl, fillDir), 0.0), 3.0) * 0.55;
+  vec3 core = vec3(0.16, 0.52, 0.86);
+  vec3 edge = vec3(0.62, 0.90, 1.12);
+  vec3 colour = mix(core, edge, fres);
 
-  vec3 albedo = vec3(0.208, 0.222, 0.246);
-  float fres = pow(clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0), 5.0);
-  vec3 colour = mix(albedo, vec3(1.0), fres) * env * mix(0.35, 1.0, occ);
+  float form = 0.22 + 0.60 * key * mix(0.30, 1.0, shade) + 0.22 * occ;
+  colour *= form;
 
-  float wrapped = pow(clamp(key * 0.90 + 0.10, 0.0, 1.0), 1.7);
-  colour += albedo * wrapped * mix(0.05, 1.0, shade) * 0.30 * occ;
-  colour += albedo * max(dot(n, fillDir), 0.0) * 0.16 * occ;
+  float scan = 0.5 + 0.5 * sin(p.y * 720.0 - uTime * 1.6);
+  // Gentler than they were. At 0.62 the banding was carrying more contrast
+  // than the lighting, so the head read as a striped surface rather than as a
+  // form with stripes on it.
+  colour *= mix(0.76, 1.05, scan);
 
-  colour *= mix(1.0, 0.34, seam);
-  colour += vec3(0.50, 0.56, 0.68) * pow(seam, 3.0) * max(dot(n, keyDir), 0.0) * 0.55 * occ;
+  float sweep = pow(clamp(sin(p.y * 6.2 - uTime * 0.75) * 0.5 + 0.5, 0.0, 1.0), 14.0);
+  colour += edge * sweep * 0.55;
 
-  vec3 halfVec = normalize(keyDir + viewDir);
-  colour += vec3(0.85, 0.95, 1.15) * pow(clamp(dot(n, halfVec), 0.0, 1.0), 120.0) * shade * occ * 1.1;
+  colour += edge * seam * 0.30;
+
+  float flicker = 0.93 + 0.05 * sin(uTime * 11.3) + 0.03 * sin(uTime * 27.7 + 1.7);
+  colour *= flicker;
 
   colour = faceMarkings(p, n, colour);
 
   // Kept character for character with the app — see SurfaceFigure for why the
   // eye is wide and warm now and why it blinks.
   float eye = min(length(p - EYE_L), length(p - EYE_R));
+  float eyeGlow = 0.0;
   float lidY = mix(1.6118, 1.5902, uBlink);
   float lid = smoothstep(lidY - 0.0007, lidY + 0.0007, p.y);
   float openEye = 1.0 - lid;
@@ -154,14 +156,22 @@ void main() {
   // startled, which is its own kind of unsettling. Warm white rather than
   // blue-white, because a cool light behind an eye is the colour of something
   // powered rather than something present.
-  colour *= mix(1.0, 0.48, (1.0 - smoothstep(0.0024, 0.0098, eye)) * openEye);
-  colour += vec3(0.80, 0.82, 0.86) * (1.0 - smoothstep(0.0, 0.0028, eye)) * openEye * 0.78;
-  colour += vec3(0.30, 0.40, 0.56) * (1.0 - smoothstep(0.0026, 0.0092, eye)) * openEye * 0.30;
+  float iris = (1.0 - smoothstep(0.0022, 0.0108, eye)) * openEye;
+  float pupil = (1.0 - smoothstep(0.0, 0.0042, eye)) * openEye;
+  float halo = (1.0 - smoothstep(0.006, 0.020, eye)) * openEye;
+  colour += vec3(0.22, 0.52, 0.86) * halo * 0.40;
+  colour += vec3(0.38, 0.74, 1.05) * iris * 1.45;
+  colour += vec3(0.86, 0.97, 1.18) * pupil * 2.10;
+  eyeGlow = max(max(iris * 0.80, pupil), halo * 0.22);
 
   float lidEdge = (1.0 - smoothstep(0.0, 0.0016, abs(p.y - lidY)))
                 * (1.0 - smoothstep(0.004, 0.0125, eye));
-  colour += vec3(0.30, 0.34, 0.40) * lidEdge * 0.5;
+  colour += vec3(0.42, 0.58, 0.78) * lidEdge * 0.55;
 
+  // Additive over the backdrop, which is how the app composites it.
+  float alpha = clamp(0.12 + fres * 0.78 + sweep * 0.35 + seam * 0.25 + eyeGlow * 0.85, 0.0, 1.0);
+  vec3 backdrop = vec3(0.012, 0.018, 0.035);
+  colour = backdrop + max(colour, vec3(0.0)) * alpha;
   colour = pow(max(colour, vec3(0.0)), vec3(1.0 / 2.2));
   gl_FragColor = vec4(colour, 1.0);
 }
@@ -191,7 +201,7 @@ const loc = gl.getAttribLocation(prog, 'a');
 gl.enableVertexAttribArray(loc);
 gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 gl.uniform2f(gl.getUniformLocation(prog, 'uResolution'), canvas.width, canvas.height);
-gl.uniform1f(gl.getUniformLocation(prog, 'uTime'), 0);
+gl.uniform1f(gl.getUniformLocation(prog, 'uTime'), +(params.get('t') || 0));
 gl.uniform3f(gl.getUniformLocation(prog, 'uCamera'), 0, 0.02, 0.62);
 gl.uniform1f(gl.getUniformLocation(prog, 'uYaw'), +(params.get('yaw') || 0));
 gl.uniform1f(gl.getUniformLocation(prog, 'uBlink'), +(params.get('blink') || 0));

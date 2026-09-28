@@ -12,7 +12,7 @@ import { FIGURE_PLACEMENT } from './placement';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { useAIStore } from '@/stores/useAIStore';
 import { useSystemStore } from '@/stores/useSystemStore';
-import { MARCH_STEPS } from './surfaceQuality';
+import { marchSteps } from './surfaceQuality';
 
 /**
  * THE FIGURE, AS A SURFACE.
@@ -60,7 +60,7 @@ export function SurfaceFigure() {
   const tier = useSystemStore((s) => s.tier);
 
   const inverse = useMemo(() => FIGURE_PLACEMENT.clone().invert(), []);
-  const steps = MARCH_STEPS[tier as 0 | 1 | 2 | 3] ?? 64;
+  const steps = marchSteps(tier);
 
   const uniforms = useMemo(
     () => ({
@@ -145,7 +145,7 @@ export function SurfaceFigure() {
      * the whole sequence was always trying to say — instead of one object
      * being swapped for another between frames.
      */
-    const want = transform.phase === 'HUMANOID_ACTIVE' && steps > 0 ? 1 : 0;
+    const want = transform.phase === 'HUMANOID_ACTIVE' ? 1 : 0;
     // The real elapsed time, not the clamped `dt` — see the matching note in
     // `HumanForm`. The two constants must stay equal or the cross-fade dips
     // through a gap where neither the beads nor the surface is fully present.
@@ -204,13 +204,26 @@ export function SurfaceFigure() {
         glslVersion: THREE.GLSL3,
         uniforms,
         transparent: true,
-        depthWrite: true,
+        /**
+         * ADDITIVE, and it does not write depth.
+         *
+         * A hologram is light added to whatever is behind it, not a surface
+         * that hides it — so the far side of the head shows faintly through
+         * the near side, and the room shows through both. That self-overlap
+         * is most of what sells it, and it comes for free from the blend mode
+         * rather than from marching the ray through multiple hits.
+         *
+         * Not writing depth is what allows it. It still TESTS depth, so
+         * anything genuinely in front still occludes it.
+         */
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
         depthTest: true,
         // The BACK faces, so the box still draws when the camera is inside it.
         // The march starts from the camera either way.
         side: THREE.BackSide,
         vertexShader: VERTEX,
-        fragmentShader: fragmentShader(Math.max(steps, 8)),
+        fragmentShader: fragmentShader(steps),
       }),
     [uniforms, tier],
   );
@@ -383,55 +396,74 @@ void main() {
   float seam = panelSeams(p);
   n = machined(p, n);
 
-  vec3 refl = reflect(dir, n);
-  vec3 fillDir = normalize(uFillDir);
-  vec3 rimDir = normalize(uRimDir);
+  /**
+   * A HOLOGRAM.
+   *
+   * Metal was the right answer to "it looks like a ghost" and the wrong answer
+   * to what this object actually is. A solid opaque bust asks to be judged as
+   * a person, and a stylised head judged as a person lands in the uncanny
+   * valley no matter how carefully it is proportioned — every pass at making
+   * it MORE convincing made it more unsettling, because the closer a not-quite
+   * face gets, the more the remaining error costs.
+   *
+   * A hologram is exempt. It is understood to be a projection of something
+   * rather than the thing, so simplification reads as the medium rather than
+   * as deformity, and nobody looks at one and asks why the cheekbone is wrong.
+   * It is also what the rest of this interface already is — the cards, the
+   * panels and the text are all holographic, and the figure was the only solid
+   * object in a room full of light.
+   *
+   * Four things make it one, and all four matter:
+   *
+   *   FRESNEL ALPHA   Transparent where it faces you, opaque at the edges.
+   *                   This is the whole illusion: a projection has no mass, so
+   *                   what you see of it is the places where your line of
+   *                   sight passes through the most of it.
+   *   SCANLINES       Fine horizontal banding, drifting slowly. The single
+   *                   most recognisable signal that an image is projected.
+   *   SWEEP           A brighter band travelling up the body — the refresh
+   *                   passing through, which is what makes it feel live rather
+   *                   than printed.
+   *   INSTABILITY     A small irregular flicker. A perfectly steady hologram
+   *                   is a statue made of light; an unsteady one is a signal.
+   *
+   * The form still has to read, so the key, the occlusion and the seams all
+   * survive — they modulate the emission instead of reflecting a room.
+   */
+  float fres = pow(clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0), 2.1);
+  float key = max(dot(n, keyDir), 0.0);
 
-  // The room, as seen by a mirror.
-  vec3 env = mix(
-    vec3(0.008, 0.013, 0.026),
-    vec3(0.070, 0.105, 0.190),
-    smoothstep(-0.55, 0.85, refl.y)
-  );
-  env += vec3(0.62, 0.78, 1.05) * pow(max(dot(refl, keyDir), 0.0), 52.0) * 2.6;
-  env += vec3(0.10, 0.20, 0.44) * pow(max(dot(refl, rimDir), 0.0), 7.0) * 0.55;
-  env += vec3(0.06, 0.075, 0.115) * pow(max(dot(refl, fillDir), 0.0), 3.0) * 0.55;
+  // Core and edge. The edge is hotter and whiter, which is what makes the
+  // silhouette draw itself.
+  vec3 core = vec3(0.16, 0.52, 0.86);
+  vec3 edge = vec3(0.62, 0.90, 1.12);
+  vec3 colour = mix(core, edge, fres);
 
-  // Dark blue steel. This is the colour the SPECULAR is tinted by, which is
-  // what makes a metal look like a particular metal.
-  // GRAPHITE, not cornflower. The albedo was a saturated blue, which on a blue
-  // backdrop with a blue key reads as one luminous blue thing — the exact
-  // palette every ghost in every film is painted in. Nearly neutral, with only
-  // enough blue left to belong to the room, and the warmth comes from the
-  // seams catching light rather than from the body.
-  vec3 albedo = vec3(0.208, 0.222, 0.246);
+  // The form, carried in the emission rather than in reflected light.
+  float form = 0.22 + 0.60 * key * mix(0.30, 1.0, shade) + 0.22 * occ;
+  colour *= form;
 
-  // Fresnel. Every material goes mirror-like at a grazing angle; on a metal it
-  // is the term that draws the edge of the form, which is why this does the
-  // job the old rim light was hired for without the rim light's flatness.
-  float fres = pow(clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0), 5.0);
-  vec3 colour = mix(albedo, vec3(1.0), fres) * env * mix(0.35, 1.0, occ);
+  // Scanlines. In the figure's own frame, so they sit ON it and travel with
+  // the head rather than being a filter over the screen.
+  float scan = 0.5 + 0.5 * sin(p.y * 720.0 - uTime * 1.6);
+  // Gentler than they were. At 0.62 the banding was carrying more contrast
+  // than the lighting, so the head read as a striped surface rather than as a
+  // form with stripes on it.
+  colour *= mix(0.76, 1.05, scan);
 
-  // The little diffuse a real metal has, so the shadow side is form and not a
-  // hole. A tenth of what a dielectric would get.
-  float wrapped = pow(clamp(key * 0.90 + 0.10, 0.0, 1.0), 1.7);
-  colour += albedo * wrapped * mix(0.05, 1.0, shade) * 0.30 * occ;
-  colour += albedo * max(dot(n, fillDir), 0.0) * 0.16 * occ;
+  // The refresh sweep.
+  float sweep = pow(clamp(sin(p.y * 6.2 - uTime * 0.75) * 0.5 + 0.5, 0.0, 1.0), 14.0);
+  colour += edge * sweep * 0.55;
 
-  // The seam itself: a dark groove, and a lip that catches the key. An edge
-  // is not a line drawn on a surface, it is a place where the surface turns.
-  colour *= mix(1.0, 0.34, seam);
-  colour += vec3(0.50, 0.56, 0.68) * pow(seam, 3.0) * max(dot(n, keyDir), 0.0) * 0.55 * occ;
+  // Seams read as brighter here, not darker: on a projection an edge is where
+  // more of the surface lines up with your eye, so it collects light.
+  colour += edge * seam * 0.30;
 
-  // A tight glint on top, for the polish.
-  vec3 halfVec = normalize(keyDir + viewDir);
-  colour += vec3(0.85, 0.95, 1.15) * pow(clamp(dot(n, halfVec), 0.0, 1.0), 120.0) * shade * occ * 1.1;
-
-  // The charge: a band travelling up the body, brightest where the key does
-  // not reach, so it lights the half of the figure that is otherwise only dark.
-  float band = sin(p.y * 5.6 - uTime * 0.8);
-  colour += vec3(0.14, 0.38, 0.72) * pow(clamp(band * 0.5 + 0.5, 0.0, 1.0), 10.0)
-          * (1.0 - wrapped) * occ * 0.45;
+  // Instability. Two incommensurable rates so it never settles into a pulse.
+  float flicker = 0.93
+    + 0.05 * sin(uTime * 11.3)
+    + 0.03 * sin(uTime * 27.7 + 1.7);
+  colour *= flicker;
 
   /**
    * THE EYES — AND THE BLINK.
@@ -458,6 +490,7 @@ void main() {
    * its own kind of wrong.
    */
   float eye = min(length(p - uEyeL), length(p - uEyeR));
+  float eyeGlow = 0.0;
 
   // The lid: a hard edge that travels from the top of the socket to the
   // bottom. Everything above the edge is covered.
@@ -469,15 +502,29 @@ void main() {
   // startled, which is its own kind of unsettling. Warm white rather than
   // blue-white, because a cool light behind an eye is the colour of something
   // powered rather than something present.
-  colour *= mix(1.0, 0.48, (1.0 - smoothstep(0.0024, 0.0098, eye)) * openEye);
-  colour += vec3(0.80, 0.82, 0.86) * (1.0 - smoothstep(0.0, 0.0028, eye)) * openEye * 0.78;
-  colour += vec3(0.30, 0.40, 0.56) * (1.0 - smoothstep(0.0026, 0.0092, eye)) * openEye * 0.30;
+  /**
+   * On a hologram the eye is the BRIGHTEST thing, not the darkest.
+   *
+   * The previous version darkened the iris first and lit a small core inside
+   * it, which is correct for an opaque head lit from outside: the socket is a
+   * recess and the light sits in it. On an emissive projection that same code
+   * subtracts from the emission and punches two flat holes in the face — the
+   * eye stops being a feature and becomes an absence, which is worse than
+   * either. Here the whole iris is added, with a hotter core inside it.
+   */
+  float iris = (1.0 - smoothstep(0.0022, 0.0108, eye)) * openEye;
+  float pupil = (1.0 - smoothstep(0.0, 0.0042, eye)) * openEye;
+  float halo = (1.0 - smoothstep(0.006, 0.020, eye)) * openEye;
+  colour += vec3(0.22, 0.52, 0.86) * halo * 0.40;
+  colour += vec3(0.38, 0.74, 1.05) * iris * 1.45;
+  colour += vec3(0.86, 0.97, 1.18) * pupil * 2.10;
+  eyeGlow = max(max(iris * 0.80, pupil), halo * 0.22);
 
   // The lid edge itself catches a little light, so the blink is visible as a
   // movement rather than as the eye simply switching off.
   float lidEdge = (1.0 - smoothstep(0.0, 0.0016, abs(p.y - lidY)))
                 * (1.0 - smoothstep(0.004, 0.0125, eye));
-  colour += vec3(0.30, 0.34, 0.40) * lidEdge * 0.5;
+  colour += vec3(0.42, 0.58, 0.78) * lidEdge * 0.55;
 
   // The drawn line work: mouth, nostrils, brow crease.
   colour = faceMarkings(p, n, colour);
@@ -486,16 +533,30 @@ void main() {
   float seam = length((p - vec3(0.0, ${MOUTH.y.toFixed(4)}, 0.0800)) * vec3(0.55, 2.4, 1.5));
   colour += vec3(0.45, 0.66, 1.0) * (1.0 - smoothstep(0.0, 0.028, seam)) * uMouth * 0.9;
 
-  // Depth, so the surface occludes and is occluded correctly by the beads and
-  // by everything else in the scene.
+  // Depth is still WRITTEN to gl_FragDepth so the depth TEST is correct
+  // against the beads and the room, even though the material does not commit
+  // it to the buffer.
   vec3 world = (uPlacement * vec4(p, 1.0)).xyz;
   vec4 clip = uProj * uView * vec4(world, 1.0);
   gl_FragDepth = clamp((clip.z / clip.w) * 0.5 + 0.5, 0.0, 1.0);
 
-  // The contrast gamma that used to sit here is gone. It existed to widen the
-  // gap between lit and shadow on a flat diffuse surface; a metal's specular
-  // already supplies that gap, and squaring it up only crushed the highlights.
   colour = max(colour, vec3(0.0)) * uExposure;
-  fragColor = vec4(colour, uReveal);
+
+  /**
+   * Alpha carries the Fresnel, not the colour.
+   *
+   * Under additive blending the alpha is what decides how much of the figure
+   * reaches the frame, so putting the falloff here is what makes it actually
+   * see-through rather than merely dim. A floor of 0.12 keeps the flat planes
+   * of the forehead and cheek present — at zero the face develops holes where
+   * it happens to face the camera squarely, which is exactly where a viewer
+   * is looking.
+   */
+  float alpha = clamp(
+    0.12 + fres * 0.78 + sweep * 0.35 + seam * 0.25 + eyeGlow * 0.85,
+    0.0,
+    1.0
+  );
+  fragColor = vec4(colour, alpha * uReveal);
 }
 `;

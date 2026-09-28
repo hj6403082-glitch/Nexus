@@ -356,13 +356,11 @@ export function HumanForm() {
     // Hand the figure over to the raymarched surface once the beads have all
     // arrived. Same time constant as the surface's own fade-in, so the two
     // cross rather than one finishing before the other starts.
-    // ONLY if the surface is actually going to appear. Handing over on a tier
-    // that refuses to march left nothing on screen at all.
+    // ONLY if the surface is actually going to appear. Handing over when it
+    // was not left nothing on screen at all. It always appears now — see
+    // `surfaceQuality.ts` — but the question is still asked in one place.
     const handingOver =
-      transform.phase === 'HUMANOID_ACTIVE' &&
-      surfaceEnabled(useSystemStore.getState().tier)
-        ? 1
-        : 0;
+      transform.phase === 'HUMANOID_ACTIVE' && surfaceEnabled() ? 1 : 0;
     /**
      * Driven by the UNCLAMPED delta, unlike everything else in this loop.
      *
