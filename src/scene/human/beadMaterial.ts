@@ -92,7 +92,7 @@ export function makeBeadMaterial(): THREE.ShaderMaterial {
        * THE HANDOVER.
        *
        * 0 while the beads are arriving, 1 once the raymarched surface has come
-       * up under them (see `SurfaceFigure.tsx`). The beads shrink away rather
+       * up under them (see `WireFigure.tsx`). The beads shrink away rather
        * than being switched off, so the eye sees a cloud of points RESOLVING
        * into a body — which is what the whole sequence was always trying to
        * say — instead of one object being swapped for another between frames.

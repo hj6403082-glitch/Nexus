@@ -16,7 +16,6 @@ import { Rig } from './Rig';
 import { PostChain } from './post/PostChain';
 import { HumanForm } from './human/HumanForm';
 import { PresentingHand } from './human/PresentingHand';
-import { SurfaceFigure } from './human/SurfaceFigure';
 import { WORLDS } from '@/core/constants/worlds';
 import { useSystemStore } from '@/stores/useSystemStore';
 import { useCarouselStore } from '@/stores/useCarouselStore';
@@ -116,7 +115,6 @@ function SceneBody({ onFail }: { onFail?: (reason: string) => void }) {
         <TargetingBracket />
         <FocusStage />
         <HumanForm />
-        <SurfaceFigure />
         <PresentingHand />
       </Suspense>
 

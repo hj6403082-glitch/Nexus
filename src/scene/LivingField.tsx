@@ -59,8 +59,17 @@ export function LivingField() {
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
-      uDeep: { value: new THREE.Color('#05070f') },
-      uMid: { value: new THREE.Color('#122344') },
+      /**
+       * DEEP NAVY, not near-black.
+       *
+       * A wireframe figure needs something behind it. On black the mesh has no
+       * field to sit in and every line is a bright stroke floating in a void;
+       * on a deep blue the network reads as being INSIDE something, which is
+       * both what the reference does and what stops the figure looking cut out
+       * and pasted on.
+       */
+      uDeep: { value: new THREE.Color('#071426') },
+      uMid: { value: new THREE.Color('#123a63') },
       uHot: { value: new THREE.Color('#3f7ac8') },
       uLevel: { value: 0 },
       uPresence: { value: 0 },
@@ -219,7 +228,7 @@ ${warp ? WARPED_FIELD : PLAIN_FIELD}
    * belongs: the broad field barely rises off black, and only the narrow vein
    * band is allowed any real light.
    */
-  vec3 colour = mix(uDeep, uMid, field * field * (0.10 + 0.22 * lift));
+  vec3 colour = mix(uDeep, uMid, field * field * (0.16 + 0.30 * lift));
   colour += uHot * veins * 0.045 * (0.35 + 0.65 * lift);
 
   // It listens. Speech lights the veins; the transformation swells the whole
@@ -230,7 +239,7 @@ ${warp ? WARPED_FIELD : PLAIN_FIELD}
   // A horizon glow so the floor lattice has something to sit against instead
   // of terminating in nothing.
   float horizon = exp(-abs(dir.y + 0.18) * 7.0);
-  colour += uMid * horizon * 0.10;
+  colour += uMid * horizon * 0.14;
 
   colour = max(colour, vec3(0.0));
 

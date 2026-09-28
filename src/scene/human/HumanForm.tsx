@@ -8,7 +8,8 @@ import { BUST_BOUNDS, BUST_SDF, sdMandibleCPU } from './sdf';
 import { bakeLighting, type BakedLight } from './lighting';
 import { CORE, FIGURE_NORMAL_MATRIX, FIGURE_PLACEMENT } from './placement';
 import { measureSpread } from './spread';
-import { surfaceEnabled } from './surfaceQuality';
+import { buildWireframe } from './wireframe';
+import { WireFigure, type FigureSurface } from './WireFigure';
 import { bakeSurface } from './Baker';
 import { selectPoisson } from './poisson';
 import { KEY_DIR, makeBeadMaterial, MAX_CARDS } from './beadMaterial';
@@ -51,6 +52,15 @@ export function HumanForm() {
   // component does not free it.
   useEffect(() => () => material.dispose(), [material]);
   const [bakeState, setBakeState] = useState<BakeState>('idle');
+  /**
+   * The finished surface, as STATE rather than a ref.
+   *
+   * `figure.current` is a ref because the frame loop reads it every frame and
+   * must not re-render when it changes. The wireframe is a different case: it
+   * is a child component that has to mount once the mesh exists, so the data
+   * it mounts from has to be something React can see.
+   */
+  const [surface, setSurface] = useState<FigureSurface | null>(null);
 
   /**
    * The particle count is FROZEN for the whole transformation.
@@ -169,6 +179,28 @@ export function HumanForm() {
           spread: spreadStep.value,
           light: lit.value,
         };
+
+        // And the network between them. Built from the same points the beads
+        // fly to, so the figure that assembles IS the figure that stays.
+        const wiring = buildWireframe(
+          selection.value.positions,
+          selection.value.positions.length / 3,
+          selection.value.spacing,
+        );
+        let wireStep = wiring.next();
+        while (!wireStep.done) {
+          if (cancelled) return;
+          await nextFrame();
+          wireStep = wiring.next();
+        }
+        if (cancelled) return;
+
+        setSurface({
+          positions: selection.value.positions,
+          normals: selection.value.normals,
+          spacing: selection.value.spacing,
+          wire: wireStep.value,
+        });
         setBakeState('ready');
         useSystemStore
           .getState()
@@ -356,11 +388,12 @@ export function HumanForm() {
     // Hand the figure over to the raymarched surface once the beads have all
     // arrived. Same time constant as the surface's own fade-in, so the two
     // cross rather than one finishing before the other starts.
-    // ONLY if the surface is actually going to appear. Handing over when it
-    // was not left nothing on screen at all. It always appears now — see
-    // `surfaceQuality.ts` — but the question is still asked in one place.
-    const handingOver =
-      transform.phase === 'HUMANOID_ACTIVE' && surfaceEnabled() ? 1 : 0;
+    // Hand over to the wireframe once the beads have all arrived. It renders
+    // at every tier, so there is no longer a case where the beads retire and
+    // nothing replaces them — which is what used to empty the room on a weak
+    // machine, and what made the figure flicker between a surface and a cloud
+    // of disconnected dots on a machine whose tier was moving.
+    const handingOver = transform.phase === 'HUMANOID_ACTIVE' ? 1 : 0;
     /**
      * Driven by the UNCLAMPED delta, unlike everything else in this loop.
      *
@@ -425,10 +458,18 @@ export function HumanForm() {
   });
 
   return (
-    <points ref={points} visible={false} frustumCulled={false}>
-      <bufferGeometry />
-      <primitive object={material} attach="material" />
-    </points>
+    <>
+      <points ref={points} visible={false} frustumCulled={false}>
+        <bufferGeometry />
+        <primitive object={material} attach="material" />
+      </points>
+      {/*
+        * The network the beads resolve into. Mounted as soon as the surface
+        * exists rather than when the transformation starts, so its buffers are
+        * uploaded long before they are needed and the hand-over costs nothing.
+        */}
+      {surface && <WireFigure surface={surface} />}
+    </>
   );
 }
 

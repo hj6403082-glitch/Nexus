@@ -31,7 +31,7 @@ import { splitClauses, pickVoice, type Clause } from '../src/ai/voiceProfile.ts'
 import { BUST_PARTS } from '../src/scene/human/anatomy.ts';
 import { sdBustCPU, sdMandibleCPU } from '../src/scene/human/sdf.ts';
 import { EYES } from '../src/scene/human/anatomy.ts';
-import { marchSteps, surfaceEnabled } from '../src/scene/human/surfaceQuality.ts';
+import { buildWireframe } from '../src/scene/human/wireframe.ts';
 import { figureFacesCamera } from '../src/scene/human/placement.ts';
 
 let failures = 0;
@@ -626,31 +626,59 @@ check('no carved part is also mandible mass', () => {
   }
 });
 
-check('every tier draws the surface, none falls back to beads', () => {
+check('the wireframe joins near neighbours and nothing else', () => {
   /**
-   * This was a feedback loop, and the worst kind: the march is the most
-   * expensive thing in the scene, so running it drove the tier down, which
-   * switched the march off, which let the frame rate recover, which raised the
-   * tier, which switched it back on. The figure flipped between a smooth
-   * surface and a cloud of disconnected dots every few seconds.
+   * Two properties, and the figure is wrong in a visible way without either.
    *
-   * Any quality dial that changes WHAT is drawn rather than HOW WELL can
-   * oscillate like that. This asserts the dial is now the second kind.
+   * No edge may be longer than the cap. A point near a fold — the underside of
+   * the jaw, say — has neighbours that are close in space but far across the
+   * surface, and joining them lashes the neck to the chin with a line through
+   * empty air.
+   *
+   * And no edge may be listed twice. Every pair is found from both ends, so
+   * without the i < j test the whole mesh is drawn twice: double the geometry,
+   * and every line twice as bright under additive blending.
    */
-  for (const tier of [0, 1, 2, 3]) {
-    assert.ok(surfaceEnabled(), `tier ${tier} must still draw the surface`);
-    assert.ok(
-      marchSteps(tier) >= 24,
-      `tier ${tier} marches ${marchSteps(tier)} steps, below the 24 the silhouette needs`,
+  const SIDE = 9;
+  const SPACING = 0.01;
+  const points: number[] = [];
+  for (let x = 0; x < SIDE; x++) {
+    for (let y = 0; y < SIDE; y++) {
+      points.push(x * SPACING, y * SPACING, 0);
+    }
+  }
+  const positions = new Float32Array(points);
+  const count = positions.length / 3;
+
+  const run = buildWireframe(positions, count, SPACING);
+  let step = run.next();
+  while (!step.done) step = run.next();
+  const { edges, edgeCount } = step.value;
+
+  assert.ok(edgeCount > 0, 'no edges were built at all');
+
+  const seen = new Set<string>();
+  let longest = 0;
+  for (let e = 0; e < edgeCount; e++) {
+    const a = edges[e * 2];
+    const b = edges[e * 2 + 1];
+    assert.ok(a < b, `edge ${e} is not stored low-index-first, so it can duplicate`);
+    const key = `${a}-${b}`;
+    assert.ok(!seen.has(key), `edge ${a}-${b} appears more than once`);
+    seen.add(key);
+    longest = Math.max(
+      longest,
+      Math.hypot(
+        positions[a * 3] - positions[b * 3],
+        positions[a * 3 + 1] - positions[b * 3 + 1],
+        positions[a * 3 + 2] - positions[b * 3 + 2],
+      ),
     );
   }
-  // And more tier buys more steps, monotonically.
-  for (const tier of [1, 2, 3]) {
-    assert.ok(
-      marchSteps(tier) > marchSteps(tier - 1),
-      `tier ${tier} should march further than tier ${tier - 1}`,
-    );
-  }
+  assert.ok(
+    longest <= SPACING * 2.2 + 1e-6,
+    `longest edge is ${(longest * 1000).toFixed(1)}mm, past the ${(SPACING * 2.2 * 1000).toFixed(1)}mm cap`,
+  );
 });
 
 console.log('\nVOICE');
