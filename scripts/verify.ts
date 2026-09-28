@@ -32,6 +32,7 @@ import { BUST_PARTS } from '../src/scene/human/anatomy.ts';
 import { sdBustCPU, sdMandibleCPU } from '../src/scene/human/sdf.ts';
 import { EYES } from '../src/scene/human/anatomy.ts';
 import { buildWireframe, mirrorAcrossMidline } from '../src/scene/human/wireframe.ts';
+import { respond } from '../src/ai/localBrain.ts';
 import {
   FIGURE_EYES,
   PORTRAIT_DISTANCE,
@@ -628,6 +629,105 @@ check('no carved part is also mandible mass', () => {
   for (const part of BUST_PARTS) {
     assert.ok(!(part.carve && part.jaw), `${part.name} is both carved and jaw`);
   }
+});
+
+// ---- the on-device brain ---------------------------------------------------
+
+const RING = {
+  faces: {
+    stocks: {
+      face: {
+        title: 'Stocks',
+        caption: 'markets',
+        metric: '176.42',
+        metricLabel: 'NVDA',
+        rows: [
+          ['NVDA', '+2.1%'],
+          ['AAPL', '-0.4%'],
+          ['TSLA', '+1.2%'],
+          ['MSFT', '+0.3%'],
+        ] as [string, string][],
+      },
+      provenance: 'sample' as const,
+    },
+    weather: {
+      face: { title: 'Weather', caption: 'clear', metric: '19°', metricLabel: 'now' },
+      provenance: 'live' as const,
+    },
+  },
+};
+
+check('the on-device brain answers from the ring, not from recollection', () => {
+  /**
+   * The hosted preview is a static export: no server, no model, no key. It
+   * greeted everyone with BRAIN OFFLINE over a figure that would not answer,
+   * which reads as a broken application rather than an unconfigured one.
+   *
+   * The third brain runs in the page. It cannot reason and does not pretend
+   * to — what it does is read the card, which is why its answer about a share
+   * price cannot be wrong in the way a small model's recollection can be. This
+   * states that it is genuinely reading the card.
+   */
+  const emits = respond({ text: 'how is nvidia today', focusModule: null }, RING);
+  const spoken = emits
+    .filter((e): e is { t: string } => 't' in e)
+    .map((e) => e.t)
+    .join('');
+
+  assert.ok(spoken.includes('176.42'), `the answer did not carry the figure: ${spoken}`);
+  assert.ok(spoken.includes('NVDA'), 'the answer did not name the ticker');
+
+  // And it brings the card forward, because asking about a number is also
+  // asking to see it.
+  const calls = emits.filter((e): e is { call: { name: string; args: Record<string, string> } } =>
+    'call' in e,
+  );
+  assert.equal(calls.length, 1, 'asking about a module did not present it');
+  assert.equal(calls[0].call.name, 'open_module');
+  assert.equal(calls[0].call.args.module, 'stocks');
+});
+
+check('the on-device brain never passes sample data off as live', () => {
+  /**
+   * The one thing a dashboard must never do. The static preview's numbers are
+   * frozen, and an answer that reads them out without saying so is a lie the
+   * user has no way to catch.
+   */
+  const sample = respond({ text: 'how are the markets', focusModule: null }, RING)
+    .filter((e): e is { t: string } => 't' in e)
+    .map((e) => e.t)
+    .join('');
+  assert.ok(/sample data/i.test(sample), `sample data was not declared: ${sample}`);
+
+  const live = respond({ text: "what's the weather", focusModule: null }, RING)
+    .filter((e): e is { t: string } => 't' in e)
+    .map((e) => e.t)
+    .join('');
+  assert.ok(!/sample data/i.test(live), 'live data was wrongly declared as sample');
+});
+
+check('the brain answers about a module it has no card for', () => {
+  // Asked before the ring has loaded, or about a module whose adapter failed.
+  // The failure mode to avoid is silence.
+  const spoken = respond({ text: 'what is on the news', focusModule: null }, RING)
+    .filter((e): e is { t: string } => 't' in e)
+    .map((e) => e.t)
+    .join('');
+  assert.ok(spoken.length > 0, 'an unloaded module produced no answer at all');
+  assert.ok(/moment|loaded/i.test(spoken), `the answer did not explain itself: ${spoken}`);
+});
+
+check('an unrecognised question still gets an honest answer', () => {
+  const spoken = respond(
+    { text: 'write me a sonnet about entropy', focusModule: null },
+    RING,
+  )
+    .filter((e): e is { t: string } => 't' in e)
+    .map((e) => e.t)
+    .join('');
+  // It says what it is and what it cannot do, rather than inventing a sonnet.
+  assert.ok(/on-device/i.test(spoken), `the brain did not declare itself: ${spoken}`);
+  assert.ok(/connect a model/i.test(spoken), 'the answer did not say how to fix it');
 });
 
 check('the portrait station frames the head', () => {

@@ -10,6 +10,7 @@ import { useAIStore } from '@/stores/useAIStore';
 import { useCarouselStore } from '@/stores/useCarouselStore';
 import { useGestureStore } from '@/stores/useGestureStore';
 import { STATIC_MODE, useModuleData } from '@/stores/useModuleData';
+import { askLocally } from '@/ai/localBrain';
 import { useSystemStore } from '@/stores/useSystemStore';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { MODULES, MODULE_BY_ID, type ModuleId } from '@/core/constants/modules';
@@ -56,36 +57,63 @@ export function useNexus() {
     const focus = ai.focusModule;
     const focusData = focus ? useModuleData.getState().records[focus]?.detail : null;
 
-    let response: Response;
-    try {
-      response = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          history: useAIStore
-            .getState()
-            .history.map((t) => ({ role: t.role, text: t.text })),
-          focusModule: focus,
-          focusData,
-        }),
-      });
-    } catch {
-      ai.setStatus('offline');
-      ai.setError('cannot reach the model');
-      return;
-    }
+    /**
+     * WHERE THE ANSWER COMES FROM.
+     *
+     * One reader loop, three possible sources: the local Ollama model, Gemini,
+     * or — when neither is reachable — the brain that runs in this page. All
+     * three produce the same newline-delimited JSON, so everything below this
+     * point is identical for all of them: the sentence-boundary flush, the
+     * speech, the holographic assembly, the tool dispatch.
+     *
+     * The fallback is not an error path. A static export has no server by
+     * design, and a developer who has not pulled a model yet is not in a
+     * failure state either. Both used to land on 'offline' and a figure that
+     * ignored you, which reads as broken rather than as unconfigured.
+     */
+    const onDevice = (): ReadableStream<Uint8Array> => {
+      const records = useModuleData.getState().records;
+      const faces: Parameters<typeof askLocally>[1]['faces'] = {};
+      for (const [id, record] of Object.entries(records)) {
+        if (record) faces[id as ModuleId] = { face: record.face, provenance: record.provenance };
+      }
+      return askLocally({ text, focusModule: focus }, { faces });
+    };
 
-    if (!response.ok || !response.body) {
-      const detail = (await response.json().catch(() => null)) as { error?: string } | null;
-      ai.setStatus('offline');
-      ai.setError(detail?.error ?? `model unavailable (${response.status})`);
-      return;
+    let body: ReadableStream<Uint8Array>;
+    if (STATIC_MODE) {
+      body = onDevice();
+    } else {
+      let response: Response | null = null;
+      try {
+        response = await fetch('/api/ai', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            history: useAIStore
+              .getState()
+              .history.map((t) => ({ role: t.role, text: t.text })),
+            focusModule: focus,
+            focusData,
+          }),
+        });
+      } catch {
+        response = null;
+      }
+
+      if (response && response.ok && response.body) {
+        body = response.body;
+      } else {
+        // 503 from the endpoint means "no provider configured", which the
+        // on-device brain is the answer to rather than a reason to give up.
+        body = onDevice();
+      }
     }
 
     const turnId = ai.beginModel();
     ai.setStatus('streaming');
 
-    const reader = response.body.getReader();
+    const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     speakQueue.current = '';
@@ -460,14 +488,24 @@ export function useNexus() {
     // after it, so the HUD can say "offline" up front instead of the user
     // discovering it by being ignored.
     if (STATIC_MODE) {
-      // No server, so no brain. Say so plainly rather than failing a fetch.
+      /**
+       * No server, so no SERVER brain — but there is still a brain.
+       *
+       * This used to set 'offline' and stop, which is how the hosted preview
+       * came to greet everyone with BRAIN OFFLINE over a figure that would not
+       * answer. The application was not broken; it was unconfigured, and there
+       * is no way to tell those apart from the outside. The on-device brain
+       * answers from the data the ring is already holding, so the preview now
+       * demonstrates the whole loop — question, stream, speech, tool call —
+       * with nothing installed.
+       */
       useAIStore.getState().setProvider({
-        name: 'none',
+        name: 'on-device',
         model: '',
-        reason: 'Static preview — run NEXUS locally for voice and chat.',
+        reason: 'Static preview — answering from the ring. Run NEXUS locally for a full model.',
       });
-      useAIStore.getState().setStatus('offline');
-      useSystemStore.getState().pushLog('static preview · ai offline', 'warn');
+      useAIStore.getState().setStatus('idle');
+      useSystemStore.getState().pushLog('brain · on-device', 'ok');
     } else {
     void fetch('/api/ai')
       .then((r) => r.json())
@@ -478,7 +516,19 @@ export function useNexus() {
           reason: info.reason,
         });
         if (info.provider === 'none') {
-          useAIStore.getState().setStatus('offline');
+          /**
+           * A server with no model configured is the same situation as no
+           * server: NEXUS still answers, from the ring, and says which it is.
+           * The reason the endpoint gave is kept, because it is the one that
+           * tells you how to fix it — pull an Ollama model, or set a key.
+           */
+          useAIStore.getState().setProvider({
+            name: 'on-device',
+            model: '',
+            reason: info.reason,
+          });
+          useAIStore.getState().setStatus('idle');
+          useSystemStore.getState().pushLog('brain · on-device', 'ok');
           useSystemStore.getState().pushLog(info.reason, 'warn');
         } else {
           useSystemStore
@@ -487,7 +537,13 @@ export function useNexus() {
         }
       })
       .catch(() => {
-        useAIStore.getState().setStatus('offline');
+        useAIStore.getState().setProvider({
+          name: 'on-device',
+          model: '',
+          reason: 'The model endpoint is unreachable. Answering from the ring.',
+        });
+        useAIStore.getState().setStatus('idle');
+        useSystemStore.getState().pushLog('brain · on-device', 'ok');
       });
     }
 

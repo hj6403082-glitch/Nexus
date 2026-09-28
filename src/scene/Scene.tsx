@@ -22,6 +22,7 @@ import { useCarouselStore } from '@/stores/useCarouselStore';
 import { useGestureStore } from '@/stores/useGestureStore';
 import { cardRegistry } from './cardRegistry';
 import { useModuleData } from '@/stores/useModuleData';
+import { useAIStore } from '@/stores/useAIStore';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { damp } from '@/core/math/spring';
 import { markContextLost, markContextRestored } from './gpuState';
@@ -218,6 +219,20 @@ function Probe() {
         return mesh.getWorldPosition(new THREE.Vector3()).toArray();
       })(),
       transform: useTransformStore.getState().phase,
+      /**
+       * What NEXUS actually said, and which brain said it.
+       *
+       * The conversation is drawn as holographic text INSIDE the canvas, so a
+       * harness has no DOM to read it from — the answer is pixels. Without
+       * this, "does it still answer with no server behind it" is a question
+       * only a human squinting at a screenshot can settle, which is how the
+       * hosted preview shipped with a brain that was never asked anything.
+       */
+      ai: {
+        status: useAIStore.getState().status,
+        provider: useAIStore.getState().provider,
+        history: useAIStore.getState().history.map((t) => ({ role: t.role, text: t.text })),
+      },
       log: useSystemStore.getState().log.map((l) => l.text),
       // The row labels each module is currently carrying. Card faces are drawn
       // to a canvas, so this is the only way a harness can assert what a card

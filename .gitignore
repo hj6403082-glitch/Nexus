@@ -14,3 +14,4 @@ src/generated
 .wire-preview
 .capture.mjs
 .shots
+.static-check.mjs
