@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MODULES } from '@/core/constants/modules';
 import { JAW } from './anatomy';
+import { KEY_DIR } from './lights';
 
 /**
  * The card-matrix uniform array is sized at SHADER COMPILE TIME, so it cannot
@@ -20,7 +21,7 @@ export const MAX_CARDS = MODULES.length;
  * shadow on the wrong side of every feature, and the result looks like a
  * rendering bug rather than like a light — so there is one vector.
  */
-export const KEY_DIR: [number, number, number] = [-0.66, 0.52, 0.42];
+export { KEY_DIR, FILL_DIR, RIM_DIR } from './lights';
 
 /**
  * THE BEADS.
@@ -87,6 +88,16 @@ export function makeBeadMaterial(): THREE.ShaderMaterial {
       uPresence: { value: 0 },
       uTime: { value: 0 },
       uBeadSize: { value: 1.0 },
+      /**
+       * THE HANDOVER.
+       *
+       * 0 while the beads are arriving, 1 once the raymarched surface has come
+       * up under them (see `SurfaceFigure.tsx`). The beads shrink away rather
+       * than being switched off, so the eye sees a cloud of points RESOLVING
+       * into a body — which is what the whole sequence was always trying to
+       * say — instead of one object being swapped for another between frames.
+       */
+      uHandover: { value: 0 },
       uJawAngle: { value: 0 },
       uJawPivot: { value: new THREE.Vector3(...JAW.pivot) },
       uJawAxis: { value: new THREE.Vector3(...JAW.axis) },
@@ -131,6 +142,7 @@ uniform float uBody;
 uniform float uPresence;
 uniform float uTime;
 uniform float uBeadSize;
+uniform float uHandover;
 uniform float uJawAngle;
 uniform vec3 uJawPivot;
 uniform vec3 uJawAxis;
@@ -150,6 +162,7 @@ out vec3 vViewPos;
 out float vRadius;
 out float vOcc;
 out float vShadow;
+out float vWorldY;
 
 vec3 rotateAbout(vec3 p, vec3 pivot, vec3 axis, float angle) {
   vec3 v = p - pivot;
@@ -222,6 +235,7 @@ void main() {
   vEye = aEye;
   vOcc = aOcclusion;
   vShadow = aShadow;
+  vWorldY = p.y;
 
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   vViewPos = mv.xyz;
@@ -243,7 +257,7 @@ void main() {
   // 1.35x the sphere's own projected size, so the covered radius is ~0.68 of
   // the gap and neighbours overlap by about a third — no holes, and each bead
   // still resolves as a bead.
-  float figureRadius = aSpread * 0.50 * uBeadSize;
+  float figureRadius = aSpread * 0.50 * uBeadSize * (1.0 - uHandover * 0.92);
   float radius = mix(0.0042 * kindScale, figureRadius, vFormed);
   vRadius = radius;
 
@@ -270,7 +284,9 @@ in vec3 vViewPos;
 in float vRadius;
 in float vOcc;
 in float vShadow;
+in float vWorldY;
 
+uniform float uTime;
 uniform vec3 uKeyDir;
 uniform float uProjA;
 uniform float uProjB;
@@ -297,43 +313,91 @@ void main() {
   float ndcZ = (uProjA * surface.z + uProjB) / max(-surface.z, 1e-5);
   gl_FragDepth = clamp(ndcZ * 0.5 + 0.5, 0.0, 1.0);
 
-  // Shading. Three lights and two baked occlusion terms — see this file's
-  // header for why the dark does more work here than the light.
-  // Weighted hard toward the SURFACE normal. Each bead carries its own sphere
-  // normal too, which is what keeps the dots legible as dots — but at 0.68 the
-  // per-bead component was loud enough to read as popcorn across a cheek that
-  // is supposed to be one smooth plane.
+  /**
+   * SHADING — AND THE REASON IT USED TO LOOK LIKE A GHOST.
+   *
+   * The previous version summed a key, a sky fill, a bounce and an ambient
+   * floor, every one of them a light blue. Add four light blues together and
+   * every part of the figure lands somewhere between "fairly bright" and "very
+   * bright": a uniformly luminous mass with faint modelling on it. That is the
+   * literal description of an apparition, which is the word it got.
+   *
+   * A sculpture is the other way round. Most of it is DARK, and light catches
+   * a few planes — the brow, the bridge, the top of the cheekbone, the
+   * jawline, the collarbones. The eye reconstructs the form from where the
+   * light STOPS. So the ambient floor here is nearly black, the fill is a
+   * quarter of what it was, and the key is narrow enough to read as a plane
+   * catching light rather than a hemisphere glowing.
+   *
+   * The colour is split across the value range for the same reason a colourist
+   * splits a ramp: cold indigo in the dark, clean cyan-white at the top. One
+   * hue at every brightness is what plastic looks like.
+   *
+   * The normal is weighted hard toward the SURFACE normal. Each bead carries
+   * its own sphere normal too, which keeps the dots legible as dots — but much
+   * above this the per-bead component reads as popcorn across a cheek that is
+   * supposed to be one smooth plane.
+   */
   vec3 n = normalize(mix(impostorNormal, vNormal, 0.86));
-  float key = max(dot(n, normalize(uKeyDir)), 0.0);
+  vec3 keyDir = normalize(uKeyDir);
+  float key = max(dot(n, keyDir), 0.0);
 
-  // The key, gated by whether anything stands between this point and it. Not
-  // gated to zero: a real shadow still catches bounced light, and a hard zero
-  // reads as a hole punched in the face.
-  vec3 base = vec3(0.42, 0.60, 0.88) * key * mix(0.12, 1.0, vShadow);
+  // Wrapped slightly past the terminator, then sharpened. The wrap keeps the
+  // falloff from banding on a curved cheek; the power narrows the lit region.
+  float wrapped = pow(clamp(key * 0.92 + 0.08, 0.0, 1.0), 1.9);
+  vec3 base = vec3(0.52, 0.74, 1.05) * wrapped * mix(0.06, 1.0, vShadow);
 
-  // Sky fill. Hemispherical and cool, and the term ambient occlusion actually
-  // describes — a point deep in a socket can see very little sky.
+  // Sky fill — a quarter of what it was, and colder. This is the term ambient
+  // occlusion actually describes: a point deep in a socket sees very little
+  // sky, and now that the rest of the figure is dark, that finally reads.
   float sky = 0.5 + 0.5 * n.y;
-  base += vec3(0.090, 0.160, 0.305) * sky * vOcc;
+  base += vec3(0.030, 0.052, 0.115) * sky * vOcc;
 
-  // Bounce, from below and dimmer. It keeps the underside of the jaw and the
-  // brow from going to flat black, which is what separates "in shadow" from
-  // "not drawn".
-  base += vec3(0.10, 0.16, 0.28) * max(-n.y, 0.0) * vOcc * 0.5;
+  // Bounce from below, dimmer still, and WARMER than everything else, so the
+  // underside of the jaw separates from the shadow on it by hue rather than by
+  // brightness — the one place the figure has no room left to get darker.
+  base += vec3(0.055, 0.050, 0.075) * max(-n.y, 0.0) * vOcc * 0.6;
 
-  // The floor the other two sit on, also occluded.
-  base += vec3(0.020, 0.040, 0.090) * vOcc;
+  // The floor everything else is measured against. Nearly black on purpose: at
+  // 0.02/0.04/0.09 it was three times too high, and it set the value of every
+  // unlit pixel on the figure.
+  base += vec3(0.006, 0.012, 0.030) * vOcc;
 
-  // Squarely-facing sheen, and only where the key actually reaches. Clamped
-  // before the pow: two unit vectors can dot to 1.0000001, pow of a negative
-  // is NaN, and one NaN pixel spreads through the whole bloom pyramid and
-  // blacks out the frame.
-  float square = pow(clamp(key, 0.0, 1.0), 16.0);
-  base += vec3(0.35, 0.50, 0.78) * square * vShadow * 0.55;
+  // A tight specular. This is what stops the surface reading as clay — clay has
+  // no highlight, and anything sculpted, polished or machined does. Blinn
+  // rather than a pure reflection: the half vector puts the hot spot where the
+  // eye expects it on a curved surface.
+  vec3 viewDir = normalize(-vViewPos);
+  vec3 halfVec = normalize(keyDir + viewDir);
+  float spec = pow(clamp(dot(n, halfVec), 0.0, 1.0), 42.0);
+  base += vec3(0.85, 0.95, 1.15) * spec * vShadow * vOcc * 0.9;
+
+  // A broader sheen along the key, giving the large planes of the forehead and
+  // chest a sense of surface without lighting the whole hemisphere. Clamped
+  // before the pow: two unit vectors can dot to 1.0000001, pow of a negative is
+  // NaN, and one NaN pixel spreads through the whole bloom pyramid and blacks
+  // out the frame.
+  float sheen = pow(clamp(key, 0.0, 1.0), 9.0);
+  base += vec3(0.18, 0.30, 0.52) * sheen * vShadow * 0.5;
 
   // Before the figure has formed, the bead still carries the card pixel it
   // came from. That is the promise of the whole sequence: these ARE the cards.
   vec3 colour = mix(vTint, base, vFormed);
+
+  /**
+   * THE CHARGE.
+   *
+   * A band of light travelling slowly up the body, strongest exactly where the
+   * key does NOT reach — so it lights the half of the figure that is otherwise
+   * only dark, without touching the modelling the key is doing on the other
+   * half.
+   *
+   * It is what makes the thing read as powered rather than carved, and it is
+   * the one moving thing on a figure that is otherwise perfectly still.
+   */
+  float band = sin(vWorldY * 5.2 - uTime * 0.85);
+  float charge = pow(clamp(band * 0.5 + 0.5, 0.0, 1.0), 9.0);
+  colour += vec3(0.16, 0.42, 0.78) * charge * (1.0 - wrapped) * vOcc * vFormed * 0.55;
 
   // The lip seam lights — a THIN LINE that widens with the level. Keeping the
   // light on the seam is the difference between a mouth and a strip of tape

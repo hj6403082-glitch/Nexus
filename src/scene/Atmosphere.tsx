@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
+import { LivingField } from './LivingField';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { TIER_BUDGET, useSystemStore } from '@/stores/useSystemStore';
@@ -20,6 +21,7 @@ import { useModuleData } from '@/stores/useModuleData';
 export function Atmosphere() {
   return (
     <group>
+      <LivingField />
       <Dust />
       <LightShafts />
       <FloorLattice />

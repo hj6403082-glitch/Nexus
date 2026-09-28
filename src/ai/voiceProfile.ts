@@ -39,18 +39,21 @@ export function splitClauses(text: string): Clause[] {
     if (!piece) continue;
 
     const last = piece.slice(-1);
+    // Longer than they were. The pauses are most of the character: a large,
+    // unhurried thing does not run its sentences together, and the silence
+    // after a statement is what makes it land as a statement.
     let pauseMs =
       last === '.' || last === '!' || last === '?'
-        ? 420
+        ? 620
         : last === ';' || last === ':' || last === '—'
-          ? 320
+          ? 460
           : last === ','
-            ? 200
-            : 140;
+            ? 290
+            : 190;
 
     // A fragment that opens with a conjunction is a decision being announced.
     // Hold a moment longer before it.
-    if (/^(and|but|or|so|because|although|yet)\b/i.test(piece)) pauseMs += 130;
+    if (/^(and|but|or|so|because|although|yet)\b/i.test(piece)) pauseMs += 190;
 
     clauses.push({ text: piece, pauseMs });
   }
@@ -71,8 +74,12 @@ export function splitClauses(text: string): Clause[] {
  * reproduce a real person's voice.
  */
 export function applyVoiceProfile(u: SpeechSynthesisUtterance): void {
-  u.rate = 0.88;
-  u.pitch = 0.42;
+  // As low and as slow as stays intelligible. Most engines turn to mud below
+  // about 0.2 of pitch and to a tape-stop below about 0.8 of rate; this sits
+  // just inside both. There is nowhere further to go WITHIN the synthesiser —
+  // everything else the voice has comes from the layer underneath it.
+  u.rate = 0.82;
+  u.pitch = 0.22;
   u.volume = 1;
   const voice = pickVoice();
   if (voice) u.voice = voice;
@@ -94,15 +101,20 @@ export function pickVoice(
   if (!voices.length) return null;
 
   // In descending order of how well each carries the character.
+  // Ordered by depth of the actual voice, not by how natural it sounds. A
+  // smooth modern neural voice with a light timbre is further from the target
+  // than an older, heavier one.
   const ranked = [
     'Microsoft Guy Online (Natural) - English (United States)',
     'Google UK English Male',
     'Daniel',
     'Microsoft David - English (United States)',
-    'Oliver',
+    'Microsoft Mark - English (United States)',
     'Alex',
-    'Rishi',
+    'Oliver',
     'Arthur',
+    'Rishi',
+    'Reed',
   ];
   for (const name of ranked) {
     const found = voices.find((v) => v.name === name);

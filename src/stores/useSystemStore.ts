@@ -80,6 +80,15 @@ let logId = 0;
 const FRAME_WINDOW = 45;
 const frameTimes: number[] = [];
 
+/** A tier pinned from the query string, or null to adapt. See `sample()`. */
+const PINNED_TIER: QualityTier | null = (() => {
+  if (typeof window === 'undefined') return null;
+  const raw = new URLSearchParams(window.location.search).get('tier');
+  if (raw === null) return null;
+  const n = Number(raw);
+  return n === 0 || n === 1 || n === 2 || n === 3 ? (n as QualityTier) : null;
+})();
+
 export const useSystemStore = create<SystemState>()((set, get) => ({
   bootStage: 'black',
   bootProgress: 0,
@@ -88,7 +97,7 @@ export const useSystemStore = create<SystemState>()((set, get) => ({
 
   fps: 60,
   frameMs: 16.7,
-  tier: 2,
+  tier: PINNED_TIER ?? 2,
   tierLocked: false,
   pendingTier: null,
   gpu: 'detecting…',
@@ -105,6 +114,21 @@ export const useSystemStore = create<SystemState>()((set, get) => ({
 
     const fps = Math.round(1000 / avg);
     const { tier, tierLocked } = get();
+
+    /**
+     * `?tier=0..3` pins quality and stops the monitor moving it.
+     *
+     * Two uses. Verifying a change to an expensive shader needs the tier held
+     * still, or the monitor quietly switches the thing being looked at off and
+     * the screenshot shows the fallback. And a user on a fast machine whose
+     * frame rate dips during a heavy moment can pin the quality they want
+     * rather than watch it ratchet down and stay there.
+     */
+    if (PINNED_TIER !== null) {
+      if (tier !== PINNED_TIER) set({ tier: PINNED_TIER });
+      set({ fps, frameMs: avg });
+      return;
+    }
 
     // Hysteresis: step down below 48, step up only above 58. Without the gap
     // the tier oscillates once per window at exactly the threshold.

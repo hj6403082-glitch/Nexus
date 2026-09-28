@@ -16,6 +16,7 @@ import { Rig } from './Rig';
 import { PostChain } from './post/PostChain';
 import { HumanForm } from './human/HumanForm';
 import { PresentingHand } from './human/PresentingHand';
+import { SurfaceFigure } from './human/SurfaceFigure';
 import { WORLDS } from '@/core/constants/worlds';
 import { useSystemStore } from '@/stores/useSystemStore';
 import { useCarouselStore } from '@/stores/useCarouselStore';
@@ -37,7 +38,23 @@ import { markContextLost, markContextRestored } from './gpuState';
 const POST_ENABLED =
   typeof window === 'undefined' || !window.location.search.includes('nopost');
 
+/**
+ * RESOLUTION IS THE BIGGEST DIAL THERE IS.
+ *
+ * Every other quality setting in this application trades one effect for a
+ * fraction of a frame. Pixel count is quadratic: dropping from 1.85 to 1.0
+ * device pixels per CSS pixel is a THIRD of the fragments, and every one of
+ * the expensive things here — bloom, depth of field, the fullscreen field,
+ * the raymarched figure — is paid per fragment.
+ *
+ * It was previously handed to R3F as a range, which lets it choose once at
+ * startup and never again. Tied to the tier instead, a machine that starts
+ * struggling gets the one change that reliably recovers a frame rate.
+ */
+const TIER_DPR = { 0: 1.0, 1: 1.25, 2: 1.5, 3: 1.85 } as const;
+
 export function Scene({ onFail }: { onFail?: (reason: string) => void } = {}) {
+  const tier = useSystemStore((s) => s.tier) as 0 | 1 | 2 | 3;
   return (
     <Canvas
       aria-label="NEXUS spatial interface. Use the left and right arrow keys to rotate the module ring, Enter to open the centred module, and Escape to close it. Press Command-K for a searchable list of everything."
@@ -47,7 +64,7 @@ export function Scene({ onFail }: { onFail?: (reason: string) => void } = {}) {
         powerPreference: 'high-performance',
         stencil: false,
       }}
-      dpr={[1, 1.85]}
+      dpr={TIER_DPR[tier] ?? 1.5}
       /**
         * 54 degrees, not 46.
         *
@@ -99,6 +116,7 @@ function SceneBody({ onFail }: { onFail?: (reason: string) => void }) {
         <TargetingBracket />
         <FocusStage />
         <HumanForm />
+        <SurfaceFigure />
         <PresentingHand />
       </Suspense>
 

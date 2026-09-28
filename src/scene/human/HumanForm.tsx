@@ -8,6 +8,7 @@ import { BUST_BOUNDS, BUST_SDF, sdMandibleCPU } from './sdf';
 import { bakeLighting, type BakedLight } from './lighting';
 import { CORE, FIGURE_NORMAL_MATRIX, FIGURE_PLACEMENT } from './placement';
 import { measureSpread } from './spread';
+import { surfaceEnabled } from './surfaceQuality';
 import { bakeSurface } from './Baker';
 import { selectPoisson } from './poisson';
 import { KEY_DIR, makeBeadMaterial, MAX_CARDS } from './beadMaterial';
@@ -281,9 +282,23 @@ export function HumanForm() {
     material.uniforms.uBeadSize.value = 1.0;
   }, [phase, bakeState, material]);
 
-  // Release the tier lock when the ring comes back, applying anything pending.
+  /**
+   * Release the tier lock as soon as the SEQUENCE is over — not when the ring
+   * comes back.
+   *
+   * The lock exists so the performance monitor cannot drop quality in the
+   * middle of the transformation, where a tier change would be visible as a
+   * jolt in a scripted shot. That reasoning covers the eight phases of the
+   * sequence and stops there. It used to hold all the way until the figure
+   * went away again, which means the whole time the most expensive shader in
+   * the application is on screen — the raymarched surface — the one system
+   * that could have responded to it was switched off. A machine that cannot
+   * afford the surface was pinned at the tier it had when it started.
+   */
   useEffect(() => {
-    if (phase === 'NORMAL') useSystemStore.getState().lockTier(false);
+    if (phase === 'NORMAL' || phase === 'HUMANOID_ACTIVE') {
+      useSystemStore.getState().lockTier(false);
+    }
   }, [phase]);
 
   // --- per frame: a few dozen uniforms and ten matrices --------------------
@@ -337,6 +352,41 @@ export function HumanForm() {
     u.uEyes.value = env.eyes;
     u.uPresence.value = env.presence;
     u.uTime.value = state.clock.elapsedTime;
+
+    // Hand the figure over to the raymarched surface once the beads have all
+    // arrived. Same time constant as the surface's own fade-in, so the two
+    // cross rather than one finishing before the other starts.
+    // ONLY if the surface is actually going to appear. Handing over on a tier
+    // that refuses to march left nothing on screen at all.
+    const handingOver =
+      transform.phase === 'HUMANOID_ACTIVE' &&
+      surfaceEnabled(useSystemStore.getState().tier)
+        ? 1
+        : 0;
+    /**
+     * Driven by the UNCLAMPED delta, unlike everything else in this loop.
+     *
+     * `dt` above is clamped to a twentieth of a second so a stalled frame
+     * cannot fling a spring across the room. Applied to a cross-fade that
+     * clamp is a bug: on a machine running at one frame a second the handover
+     * advances by a twentieth of a second per frame, so a fade specified as
+     * half a second takes ten, and the figure sits there covered in beads
+     * while the surface waits underneath it. A fade has no stability problem
+     * to protect — it is bounded at both ends — so it gets the real elapsed
+     * time and completes in half a second at any frame rate.
+     */
+    u.uHandover.value +=
+      (handingOver - u.uHandover.value) * (1 - Math.exp(-rawDelta / 0.35));
+
+    /**
+     * And then they stop being drawn at all.
+     *
+     * Shrinking alone is not enough. A bead sits ON the surface and protrudes
+     * by its own radius, so however small it gets it still wins the depth test
+     * against the surface underneath — thirty-two thousand of them speckled
+     * the finished figure with dark pinpricks, which looked like dirt.
+     */
+    if (points.current) points.current.visible = u.uHandover.value < 0.97;
     u.uViewportHeight.value = size.height;
 
     const camera = state.camera as THREE.PerspectiveCamera;

@@ -30,6 +30,8 @@ import { VERBS, isVerb } from '../src/server/bridge/verbs.ts';
 import { splitClauses, pickVoice, type Clause } from '../src/ai/voiceProfile.ts';
 import { BUST_PARTS } from '../src/scene/human/anatomy.ts';
 import { sdBustCPU, sdMandibleCPU } from '../src/scene/human/sdf.ts';
+import { EYES } from '../src/scene/human/anatomy.ts';
+import { MARCH_STEPS, surfaceEnabled } from '../src/scene/human/surfaceQuality.ts';
 import { figureFacesCamera } from '../src/scene/human/placement.ts';
 
 let failures = 0;
@@ -553,14 +555,66 @@ check('the mandible is a region, not a height', () => {
 });
 
 check('the eye sockets are recesses, not bumps', () => {
-  // A point on the eye axis, at the depth the surrounding face reaches, must
-  // be OUTSIDE the body — that is what a socket means. Before the carve, the
-  // eye lights sat 50mm inside the skull where no baked point could reach.
-  const socketMouth = sdBustCPU(0.0395, 1.6065, 0.092);
-  const cheekAtSameDepth = sdBustCPU(0.0395, 1.560, 0.092);
+  /**
+   * Measured against the FIELD, not against hard-coded coordinates.
+   *
+   * The first version of this check named three points by number, and every
+   * subsequent reshaping of the face moved them — so it failed on a face whose
+   * sockets were perfectly good. A test that has to be edited whenever the
+   * thing it tests changes is not testing anything.
+   *
+   * The claim is geometric and survives any reshaping: the surface on the eye
+   * axis must sit FURTHER BACK than the surface on the cheek just below it.
+   * That is what "the eye is set into the head" means.
+   */
+  const frontZ = (x: number, y: number): number => {
+    let z = 0.30;
+    for (let i = 0; i < 500; i++) {
+      const d = sdBustCPU(x, y, z);
+      if (d < 0.0002) return z;
+      z -= Math.max(d * 0.7, 0.0002);
+      if (z < -0.2) return Number.NaN;
+    }
+    return Number.NaN;
+  };
+
+  const eyeX = EYES.right[0];
+  const eyeY = EYES.right[1];
+  const atEye = frontZ(eyeX, eyeY);
+  const atCheek = frontZ(eyeX, eyeY - 0.030);
+  assert.ok(Number.isFinite(atEye) && Number.isFinite(atCheek), 'no surface found');
   assert.ok(
-    socketMouth > cheekAtSameDepth,
-    'the socket is not recessed relative to the cheek beside it',
+    atEye < atCheek - 0.002,
+    `the eye should sit behind the cheek below it (eye ${(atEye * 1000).toFixed(1)}mm, ` +
+      `cheek ${(atCheek * 1000).toFixed(1)}mm)`,
+  );
+});
+
+check('the nose is the most forward point on the face', () => {
+  // It stopped being so once, when the face block was pushed out to the same
+  // depth — and the whole lower face fused into a muzzle. Nothing caught it.
+  const frontZ = (x: number, y: number): number => {
+    let z = 0.30;
+    for (let i = 0; i < 500; i++) {
+      const d = sdBustCPU(x, y, z);
+      if (d < 0.0002) return z;
+      z -= Math.max(d * 0.7, 0.0002);
+      if (z < -0.2) return Number.NaN;
+    }
+    return Number.NaN;
+  };
+  let best = -Infinity;
+  let bestY = 0;
+  for (let y = 1.50; y <= 1.70; y += 0.002) {
+    const z = frontZ(0, y);
+    if (Number.isFinite(z) && z > best) {
+      best = z;
+      bestY = y;
+    }
+  }
+  assert.ok(
+    bestY > 1.570 && bestY < 1.592,
+    `the most forward midline point is at y=${(bestY * 1000).toFixed(0)}mm, which is not the nose`,
   );
 });
 
@@ -570,6 +624,28 @@ check('no carved part is also mandible mass', () => {
   for (const part of BUST_PARTS) {
     assert.ok(!(part.carve && part.jaw), `${part.name} is both carved and jaw`);
   }
+});
+
+check('a tier that cannot march still shows a figure', () => {
+  /**
+   * The beads retire only when the surface will replace them.
+   *
+   * These were two separate expressions of the same intent, and they
+   * disagreed: tier 0 refuses to march, but the beads handed over anyway, so a
+   * weak machine reaching the humanoid phase was shown an empty room. It is
+   * one function now, and this asserts that every tier ends up with something
+   * drawn.
+   */
+  for (const tier of [0, 1, 2, 3]) {
+    const marches = MARCH_STEPS[tier as 0 | 1 | 2 | 3] > 0;
+    assert.equal(
+      surfaceEnabled(tier),
+      marches,
+      `tier ${tier}: the beads and the surface disagree about who is drawing`,
+    );
+  }
+  assert.equal(surfaceEnabled(0), false, 'tier 0 must keep the beads');
+  assert.ok(surfaceEnabled(3), 'the top tier must draw the surface');
 });
 
 console.log('\nVOICE');

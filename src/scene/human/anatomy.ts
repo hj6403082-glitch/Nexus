@@ -34,6 +34,8 @@
  * no lips, no nostrils. Broad planes and hard structure.
  */
 
+import { MOUTH } from './faceMarkings';
+
 export type V3 = readonly [number, number, number];
 
 export type Prim =
@@ -92,64 +94,123 @@ function mirrored(name: string, part: Omit<Part, 'name'>): Part[] {
  * sockets must be carved after the mass they are carved from.
  */
 export const BUST_PARTS: Part[] = [
-  // ---- skull ---------------------------------------------------------------
+  /**
+   * THE HEAD — A MASK, NOT A RECONSTRUCTION.
+   *
+   * Five passes were spent trying to sculpt a naturalistic face out of blended
+   * primitives, and each one traded a deformity for a different deformity: the
+   * nasion carve that fixed the profile bored a third eye socket in the
+   * forehead; widening it turned that into a visor slot; the lip masses that
+   * gave the mouth substance read as a muzzle, and the seam that made the
+   * mouth visible read as a letterbox. The version with the most anatomy in it
+   * was the one that looked most diseased.
+   *
+   * That is not bad luck, it is the medium. A viewer's tolerance for error in
+   * a human face is about a millimetre, and every smooth-minimum here is a
+   * surface that bulges by a fraction of its blend radius in a direction
+   * nobody chose. Naturalism is the one target this technique cannot hit, and
+   * aiming at it and missing lands squarely in the uncanny valley — which is
+   * precisely where "disgusting" comes from.
+   *
+   * So the target moved. This is a MASK: a classical bust, an Oscar, a helmet.
+   * Smooth planes, exact proportions, and deliberately few features — no
+   * nostrils, no lip masses, no lids, no ears. What is left is the structure
+   * that carries light: a brow, two cheekbones, a nose ridge, a jaw, and two
+   * eyes. Nothing in it is trying to pass for a person, so nothing in it can
+   * fail to.
+   *
+   * The proportions are anthropometric even though the surface is not: head
+   * 210 mm crown to chin, 155 mm wide, eyes on the vertical midline 63 mm
+   * apart, nose base a third of the way from eyes to chin. Those are what make
+   * a stylised head read as elegant instead of as approximate.
+   */
   {
+    // Lower and deeper than a human skull rather than taller. Real skulls are
+    // hidden by hair; this one is bare, so its proportions have to work naked.
     name: 'cranium',
-    prim: { kind: 'ellipsoid', p: [0, 1.652, -0.012], r: [0.077, 0.092, 0.094] },
+    prim: { kind: 'ellipsoid', p: [0, 1.6300, -0.0075], r: [0.0778, 0.0792, 0.0955] },
     blend: 0,
   },
   {
-    // The facial block: narrower and shallower than the cranium, set forward.
-    // The step between the two is the temple.
-    name: 'faceBlock',
-    prim: { kind: 'ellipsoid', p: [0, 1.594, 0.024], r: [0.0735, 0.076, 0.081] },
-    blend: 0.040,
-  },
-  {
-    // Superciliary arches. Buried at the midline and proud at the sides, which
-    // is both what a brow actually does and what casts the shadow that tells
-    // you where the eyes are before you can see them.
-    name: 'brow',
-    prim: { kind: 'capsule', a: [-0.058, 1.6355, 0.070], b: [0.058, 1.6355, 0.070], ra: 0.0155, rb: 0.0155 },
+    // The frontal bone. Without it the forehead is just the front of the
+    // cranium sphere, 12 mm behind the brow — an ape's profile.
+    name: 'forehead',
+    prim: { kind: 'ellipsoid', p: [0, 1.6535, 0.0248], r: [0.0655, 0.0455, 0.0638] },
     blend: 0.020,
   },
+  {
+    // The facial block, set back from the nose so the nose can project past
+    // it. When these were at the same depth the whole lower face fused into a
+    // single forward mass with two holes in it.
+    name: 'faceBlock',
+    prim: { kind: 'ellipsoid', p: [0, 1.5905, 0.0155], r: [0.0705, 0.0765, 0.0785] },
+    blend: 0.026,
+  },
+  ...mirrored('brow', {
+    /**
+     * AN ARCH, and only 3 mm of it.
+     *
+     * Two things were wrong with the bar this replaces. It was seventeen
+     * millimetres inside the face block — measured, not guessed — so every
+     * earlier attempt to "make the brow heavier" was adjusting a primitive
+     * that was not on the surface at all. And when it was finally brought out,
+     * a single capsule at constant height protruded by the same amount along
+     * its whole length and read as a Neanderthal ledge across the forehead.
+     *
+     * A real brow arches: highest and most proud above the pupil, falling away
+     * and back toward the temple. Two segments do that, and three millimetres
+     * of relief is enough — a heavy brow is the fastest route to a scowl, and
+     * a mask that scowls is a gargoyle.
+     */
+    prim: { kind: 'capsule', a: [0.0055, 1.6272, 0.0808], b: [0.0508, 1.6208, 0.0730], ra: 0.0132, rb: 0.0108 },
+    blend: 0.012,
+  }),
   ...mirrored('cheek', {
-    prim: { kind: 'ellipsoid', p: [0.0505, 1.5835, 0.049], r: [0.034, 0.038, 0.044] },
-    blend: 0.028,
+    // High and wide. This is the plane the key rakes across, and in a face
+    // with this little detail it does most of the work of reading as a face.
+    prim: { kind: 'ellipsoid', p: [0.0512, 1.5915, 0.0372], r: [0.0318, 0.0332, 0.0418] },
+    blend: 0.020,
   }),
   {
     name: 'noseBridge',
-    prim: { kind: 'capsule', a: [0, 1.628, 0.074], b: [0, 1.5885, 0.0995], ra: 0.0105, rb: 0.016 },
-    blend: 0.013,
+    // Starts BELOW and BEHIND the brow, so the saddle between them is where
+    // the two primitives simply do not reach rather than somewhere a carve had
+    // to be dug. Every attempt to dig it — sphere, saddle, slot — read as a
+    // hole in the forehead, because a shallow carve on a convex surface has a
+    // visible edge and a visible edge on a face is a scar.
+    prim: { kind: 'capsule', a: [0, 1.6095, 0.0668], b: [0, 1.5788, 0.0958], ra: 0.0054, rb: 0.0090 },
+    blend: 0.009,
   },
   {
+    // The tip, and nothing else. No wings, no nostrils — both were carves or
+    // near-carves beside a convex form, and both raised rims.
+    // NARROWER. As a 23 mm ball on the end of a ridge it read as a bulb stuck
+    // on the face; an ellipsoid flattened in X and drawn out in Z is a tip.
     name: 'noseTip',
-    prim: { kind: 'sphere', p: [0, 1.5805, 0.1055], r: 0.0180 },
-    blend: 0.011,
+    prim: { kind: 'ellipsoid', p: [0, 1.5765, 0.0952], r: [0.0092, 0.0105, 0.0128] },
+    blend: 0.009,
   },
-  ...mirrored('ala', {
-    prim: { kind: 'sphere', p: [0.0145, 1.5775, 0.0925], r: 0.0120 },
-    blend: 0.010,
-  }),
 
   // ---- mandible ------------------------------------------------------------
   // Two rami running from the hinge down to the chin, bridged under it. This
-  // is the part that swings.
+  // is the part that swings when it speaks.
   ...mirrored('ramus', {
-    prim: { kind: 'capsule', a: [0.0665, 1.5955, -0.030], b: [0.0225, 1.5245, 0.061], ra: 0.0265, rb: 0.0225 },
-    blend: 0.020,
+    prim: { kind: 'capsule', a: [0.0648, 1.5915, -0.0300], b: [0.0206, 1.5372, 0.0520], ra: 0.0252, rb: 0.0202 },
+    blend: 0.014,
     jaw: true,
   }),
   {
     name: 'jawBody',
-    prim: { kind: 'capsule', a: [-0.0235, 1.5245, 0.060], b: [0.0235, 1.5245, 0.060], ra: 0.0235, rb: 0.0235 },
-    blend: 0.018,
+    prim: { kind: 'capsule', a: [-0.0218, 1.5372, 0.0508], b: [0.0218, 1.5372, 0.0508], ra: 0.0214, rb: 0.0214 },
+    blend: 0.014,
     jaw: true,
   },
   {
+    // Set back from the mouth by about 8 mm, as a real one is. Level with it,
+    // the lower face becomes one plane and reads as a jutting jaw.
     name: 'chin',
-    prim: { kind: 'sphere', p: [0, 1.5215, 0.070], r: 0.0275 },
-    blend: 0.022,
+    prim: { kind: 'ellipsoid', p: [0, 1.5352, 0.0578], r: [0.0242, 0.0225, 0.0252] },
+    blend: 0.016,
     jaw: true,
   },
 
@@ -206,27 +267,19 @@ export const BUST_PARTS: Part[] = [
   }),
 
   // ---- carved ---------------------------------------------------------------
-  // Everything below is SUBTRACTED, and everything below is why the figure has
-  // a face at all.
+  // THREE, and all of them shallow. Every carve beside a convex form raises a
+  // rim around itself, so each one here is the smallest that still reads.
   ...mirrored('socket', {
-    // SMALLER AND SHALLOWER than they were. At 30x21x28 mm, carved 18 mm deep
-    // and only 12 mm apart at their inner edges, the two recesses merged
-    // across the bridge of the nose into a single dark band — the figure
-    // appeared to be wearing sunglasses, and the nose disappeared into the
-    // middle of them. Pulled apart, shrunk, and made shallower so each is its
-    // own socket with lit bone between them.
-    prim: { kind: 'ellipsoid', p: [0.0395, 1.6065, 0.084], r: [0.0255, 0.0175, 0.023] },
-    blend: 0.014,
+    // 34 x 18 mm and 13 mm deep. A human eye opening is about 30 x 11 mm; the
+    // first version of this was 50 x 34 and set 76 mm apart, which is the
+    // caricature that reads as "alien grey" and was doing it single-handed.
+    prim: { kind: 'ellipsoid', p: [0.0315, 1.6012, 0.0800], r: [0.0170, 0.0092, 0.0132] },
+    blend: 0.0060,
     carve: true,
   }),
-  {
-    // The lip groove. Shallow — it is a seam for the mouth light to live in,
-    // not an opening. The mouth OPENS by hinging the mandible.
-    name: 'lipSeam',
-    prim: { kind: 'capsule', a: [-0.024, 1.5545, 0.092], b: [0.024, 1.5545, 0.092], ra: 0.0075, rb: 0.0075 },
-    blend: 0.010,
-    carve: true,
-  },
+  // The mouth is not carved. It is DRAWN — see `faceMarkings.ts`. Five
+  // geometric versions of this seam each broke differently, because a carve
+  // has to reach a surface that five other primitives are jointly deciding.
   {
     name: 'sternumGroove',
     prim: { kind: 'capsule', a: [0, 1.300, 0.082], b: [0, 1.170, 0.086], ra: 0.016, rb: 0.022 },
@@ -235,12 +288,12 @@ export const BUST_PARTS: Part[] = [
   },
 
   // ---- the eyes themselves --------------------------------------------------
-  // Added back AFTER the sockets are carved, so each sits in its own recess
-  // with a rim of brow and cheek around it. Their front pole is the only place
-  // on this figure where a light is allowed to live.
+  // Added back AFTER the sockets are carved, so each sits in its own recess.
+  // No lids: a lid is two more rims around an eye that already has one, and
+  // together they read as goggles.
   ...mirrored('eyeball', {
-    prim: { kind: 'sphere', p: [0.0395, 1.6048, 0.0685], r: 0.0155 },
-    blend: 0.008,
+    prim: { kind: 'sphere', p: [0.0315, 1.6000, 0.0648], r: 0.0105 },
+    blend: 0.0045,
   }),
 ];
 
@@ -265,8 +318,13 @@ export const JAW = {
    * See `Part.jaw` for why membership is a distance and not a height.
    */
   feather: 0.030,
-  /** The lip seam, in the figure's local frame. The light lives HERE only. */
-  seam: { y: 1.5545, z: 0.092, halfWidth: 0.024 },
+  /**
+   * Where the mouth is, re-exported from `faceMarkings.ts` so there is one
+   * statement of it. The mouth is drawn rather than carved — see that file —
+   * and the beads' seam glow has to light the same line the surface draws, or
+   * the two disagree by a few millimetres during the cross-fade.
+   */
+  seam: { y: MOUTH.y, z: 0.0800, halfWidth: MOUTH.halfWidth },
   /**
    * Openness is held to five discrete steps. A continuous jaw reads as rubber;
    * quantising it reads as a machine deciding how far to open.

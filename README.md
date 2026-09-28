@@ -94,8 +94,32 @@ without moving the surface they sit on, and therefore cannot tear it.
 
 **The beads are opaque sphere impostors writing curved depth**, not additive
 discs. Additive discs sum where they overlap, so the silhouette blows out to
-white and the result reads as an *outline* of a person. And there is no rim
-term, for the same reason.
+white and the result reads as an *outline* of a person.
+
+**The beads arrive; a raymarched surface takes over.** Thirty-two thousand
+beads over a bust is 3.2 mm of spacing, and a lip is 8 mm thick — so the
+particles are the right thing to *watch arrive* and the wrong thing to then
+look at, because every feature is one to three dots wide. Once they have
+landed, the same field is raymarched per pixel instead of per bead: exact
+silhouette, gradient normals, and occlusion and shadows marched live so the
+sockets and the mouth actually have dark in them. The two cross-fade, so what
+you see is a cloud *resolving* into a body rather than one object being swapped
+for another. Tier 0 keeps the beads and never pays for the march.
+
+**The head is a mask, not a reconstruction.** Five passes tried to sculpt a
+naturalistic face out of blended primitives and each traded one deformity for
+another — a carve that fixed the profile bored a third socket in the forehead;
+lip masses that gave the mouth substance read as a muzzle. A viewer's tolerance
+for error in a human face is about a millimetre, and every smooth-minimum is a
+surface bulging by a fraction of its blend radius in a direction nobody chose.
+So the geometry carries *form* — brow, cheekbones, nose, jaw — and the fine
+line work (mouth, nostrils, orbital crease) is **drawn in the shader**, where
+it cannot fragment or gouge. The proportions are anthropometric even though the
+surface is deliberately not.
+
+**`npm run face`** writes a standalone page that raymarches the same field with
+the same lights, so the head can be judged in seconds instead of through a
+build, a bake and an eight-phase sequence.
 
 **One clock per sequence, and every layer reads from it.** The presentation
 choreography and the transformation each have exactly one number advancing;
