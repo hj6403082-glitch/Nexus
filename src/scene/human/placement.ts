@@ -51,6 +51,27 @@ export const FIGURE_PLACEMENT = (() => {
   return m;
 })();
 
+/**
+ * WHERE THE EYES ARE, IN THE ROOM.
+ *
+ * Derived from the placement rather than written down beside it, because two
+ * places that both claim to know where the figure is will disagree the first
+ * time one of them moves. The rig frames the portrait from this, so moving the
+ * figure moves the shot with it.
+ */
+export const FIGURE_EYES = new THREE.Vector3(0, 1.6045, 0.0855).applyMatrix4(
+  (() => FIGURE_PLACEMENT)(),
+);
+
+/**
+ * How far in front of the eyes the camera stands once the figure is present.
+ *
+ * At a 54 degree field of view this makes the frame 0.43 m tall and the head
+ * 0.21 m of it — very nearly half. Closer and the crown leaves the top of the
+ * frame; further and it becomes a figure seen across a room.
+ */
+export const PORTRAIT_DISTANCE = 0.42;
+
 export const FIGURE_NORMAL_MATRIX = new THREE.Matrix3().setFromMatrix4(FIGURE_PLACEMENT);
 
 /**

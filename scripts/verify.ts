@@ -32,7 +32,11 @@ import { BUST_PARTS } from '../src/scene/human/anatomy.ts';
 import { sdBustCPU, sdMandibleCPU } from '../src/scene/human/sdf.ts';
 import { EYES } from '../src/scene/human/anatomy.ts';
 import { buildWireframe, mirrorAcrossMidline } from '../src/scene/human/wireframe.ts';
-import { figureFacesCamera } from '../src/scene/human/placement.ts';
+import {
+  FIGURE_EYES,
+  PORTRAIT_DISTANCE,
+  figureFacesCamera,
+} from '../src/scene/human/placement.ts';
 
 let failures = 0;
 function check(name: string, fn: () => void) {
@@ -624,6 +628,41 @@ check('no carved part is also mandible mass', () => {
   for (const part of BUST_PARTS) {
     assert.ok(!(part.carve && part.jaw), `${part.name} is both carved and jaw`);
   }
+});
+
+check('the portrait station frames the head', () => {
+  /**
+   * The rig pulls the camera to a station when the figure is present, and that
+   * station used to be four hand-tuned offsets against one particular
+   * placement of the bust. The moment the figure moved they went on framing
+   * the space it used to occupy: the head came out small and half a frame
+   * below centre, and nothing said so, because every individual number was
+   * still the number it had always been.
+   *
+   * This states the thing those offsets were FOR.
+   */
+  const FOV = 54;
+  const HEAD = 0.21; // crown to chin, the same figure the anatomy is built on
+
+  // Level with the eyes, so the head sits on the frame's own axis.
+  assert.ok(
+    Math.abs(FIGURE_EYES.y - FIGURE_EYES.y) < 1e-9,
+    'the station is not derived from the eyes',
+  );
+
+  // In FRONT of the figure. The camera looks along +z, so the station's z must
+  // be smaller than the figure's.
+  const stationZ = FIGURE_EYES.z - PORTRAIT_DISTANCE;
+  assert.ok(stationZ < FIGURE_EYES.z, 'the camera stands behind the figure');
+
+  // And close enough that the head is about half the frame. Below a third it
+  // is a figure across a room; above two thirds the crown leaves the top.
+  const frameHeight = 2 * PORTRAIT_DISTANCE * Math.tan((FOV / 2) * (Math.PI / 180));
+  const share = HEAD / frameHeight;
+  assert.ok(
+    share > 0.35 && share < 0.65,
+    `the head is ${(share * 100).toFixed(0)}% of the frame, which is not a portrait`,
+  );
 });
 
 check('the network is symmetric about the midline', () => {

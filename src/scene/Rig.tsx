@@ -10,6 +10,7 @@ import { useCarouselStore } from '@/stores/useCarouselStore';
 import { useSystemStore } from '@/stores/useSystemStore';
 import { useTransformStore } from '@/stores/useTransformStore';
 import { CAROUSEL_RADIUS } from './Carousel';
+import { FIGURE_EYES, PORTRAIT_DISTANCE } from './human/placement';
 
 const BASE = new THREE.Vector3(0, 0.12, 0);
 const LOOK = new THREE.Vector3(0, 0, CAROUSEL_RADIUS);
@@ -78,18 +79,36 @@ export function Rig() {
 
     const pull = embodiedPull.value;
 
+    /**
+     * THE PORTRAIT STATION, DERIVED FROM WHERE THE FIGURE IS.
+     *
+     * This used to be four hand-tuned offsets — up 0.22, back 0.55, look up
+     * 0.35 and out to 1.1 — chosen against one particular placement of the
+     * bust. They are the kind of numbers that are right exactly once: the
+     * moment the figure moved, the camera went on framing the empty space it
+     * used to occupy, and the head ended up small and half a frame below
+     * centre while every measurement said it was where it should be.
+     *
+     * So the station is now COMPUTED. Level with the eyes, a portrait distance
+     * in front of them, looking at them. Move the figure and the shot follows.
+     */
+    const station = FIGURE_EYES;
+
     target.set(
-      baseline.current.x + driftX,
-      baseline.current.y + driftY + pull * 0.22,
-      baseline.current.z + driftZ + push.value - pull * 0.55,
+      baseline.current.x + driftX + pull * (station.x - baseline.current.x),
+      baseline.current.y + driftY + pull * (station.y - baseline.current.y),
+      baseline.current.z +
+        driftZ +
+        push.value +
+        pull * (station.z - PORTRAIT_DISTANCE - baseline.current.z),
     );
 
     camera.position.copy(target);
 
     lookTarget.set(
-      LOOK.x + lookDriftX,
-      LOOK.y + lookDriftY + pull * 0.35,
-      LOOK.z * (1 - pull) + pull * 1.1,
+      LOOK.x + lookDriftX + pull * (station.x - LOOK.x),
+      LOOK.y + lookDriftY + pull * (station.y - LOOK.y),
+      LOOK.z * (1 - pull) + pull * station.z,
     );
     camera.lookAt(lookTarget);
   });
